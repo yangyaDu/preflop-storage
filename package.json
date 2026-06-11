@@ -6,15 +6,20 @@
   "scripts": {
     "build:binary": "bun run src/cli/build-binary.ts",
     "query:hand": "bun run src/cli/query-hand.ts",
+    "analyze:sqlite": "bun run src/cli/analyze-sqlite.ts",
+    "analyze:binary": "bun run src/cli/analyze-binary.ts",
+    "analyze": "bun run analyze:sqlite && bun run analyze:binary --sqlite-report reports/sqlite-analysis.json --md reports/storage-analysis.md",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "check": "bun run typecheck && bun run lint && bun test"
+    "check": "bun run typecheck && bun run lint && bun test",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@eslint/js": "latest",
     "@types/bun": "latest",
     "eslint": "latest",
+    "husky": "^9.1.7",
     "typescript": "latest",
     "typescript-eslint": "latest"
   }

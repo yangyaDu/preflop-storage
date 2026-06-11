@@ -121,6 +121,24 @@ bun run lint
 bun run check
 ```
 
+分析旧 SQLite 数据：
+
+```powershell
+bun run analyze:sqlite --source range-db/range.db --out reports/sqlite-analysis.json --md reports/sqlite-analysis.md
+```
+
+分析新二进制数据，并生成体积对比报告：
+
+```powershell
+bun run analyze:binary --dir range-db/binary --sqlite-report reports/sqlite-analysis.json --out reports/binary-analysis.json --md reports/storage-analysis.md
+```
+
+一次性运行阶段 1 分析：
+
+```powershell
+bun run analyze
+```
+
 构建完整二进制库：
 
 ```powershell
