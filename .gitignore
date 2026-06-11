@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+
+# Bun / package manager cache
+.bun/
+
+# Build and coverage outputs
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+bun-debug.log*
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Local database and generated binary data
+range-db/*.db
+range-db/*.db-shm
+range-db/*.db-wal
+range-db/binary/
+range-db/binary-*/
+range-db/binary-smoke/
+range-db/**/*.bin
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+
+# Editor and OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

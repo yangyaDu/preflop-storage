@@ -1,0 +1,21 @@
+{
+  "name": "preflop-storage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:binary": "bun run src/cli/build-binary.ts",
+    "query:hand": "bun run src/cli/query-hand.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "check": "bun run typecheck && bun run lint && bun test"
+  },
+  "devDependencies": {
+    "@eslint/js": "latest",
+    "@types/bun": "latest",
+    "eslint": "latest",
+    "typescript": "latest",
+    "typescript-eslint": "latest"
+  }
+}
