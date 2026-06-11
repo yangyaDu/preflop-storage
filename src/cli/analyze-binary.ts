@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { formatBytes, formatNumber, formatPercent, markdownTable, safeRatio } from "../analysis/format";
+import { quoteIdentifier, getBinFileName } from "../db/naming";
 import { parseCliArgs, getStringArg } from "./args";
 
 interface BinaryFileInfo {
@@ -140,39 +141,99 @@ async function analyzeBinary(
   }
 }
 
+interface ParsedIndexTable {
+  tableName: string;
+  strategy: string;
+  playerCount: number;
+  depthBb: number;
+  binFile: string;
+}
+
+function getIndexTables(db: Database): ParsedIndexTable[] {
+  const tableRows = db
+    .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'range_pack_index_%' ORDER BY name")
+    .all() as Array<{ name: string }>;
+
+  const pattern = /^range_pack_index_(.+)_([0-9]+)max_([0-9]+)BB$/;
+  const results: ParsedIndexTable[] = [];
+
+  for (const row of tableRows) {
+    const match = row.name.match(pattern);
+    if (!match) continue;
+    const [, strategy, playerCountText, depthBbText] = match;
+    const playerCount = Number(playerCountText);
+    const depthBb = Number(depthBbText);
+    results.push({
+      tableName: row.name,
+      strategy,
+      playerCount,
+      depthBb,
+      binFile: getBinFileName(strategy, playerCount, depthBb),
+    });
+  }
+
+  return results;
+}
+
 function getDimensionStats(db: Database, rangeBins: BinaryFileInfo[]): DimensionBinaryStats[] {
   const fileBytesByName = new Map(rangeBins.map((file) => [file.name, file.bytes]));
-  const rows = db
-    .query(`
-      SELECT
-        strategy,
-        player_count AS playerCount,
-        depth_bb AS depthBb,
-        bin_file AS binFile,
-        COUNT(*) AS packCount,
-        COUNT(DISTINCT action_schema_id) AS actionSchemaCount,
-        SUM(hand_count) AS totalHandCount,
-        AVG(hand_count) AS avgHandCount,
-        MIN(hand_count) AS minHandCount,
-        MAX(hand_count) AS maxHandCount,
-        SUM(byte_length) AS totalPackBytes,
-        AVG(byte_length) AS avgPackBytes,
-        MIN(byte_length) AS minPackBytes,
-        MAX(byte_length) AS maxPackBytes
-      FROM range_pack_index
-      GROUP BY strategy, player_count, depth_bb, bin_file
-      ORDER BY strategy, player_count, depth_bb
-    `)
-    .all() as Array<Omit<DimensionBinaryStats, "binFileBytes" | "indexToFileBytesRatio">>;
+  const rows: DimensionBinaryStats[] = [];
 
-  return rows.map((row) => {
-    const binFileBytes = fileBytesByName.get(row.binFile) ?? 0;
-    return {
-      ...row,
+  for (const info of getIndexTables(db)) {
+    const stats = db
+      .query(`
+        SELECT
+          COUNT(*) AS packCount,
+          COUNT(DISTINCT action_schema_id) AS actionSchemaCount,
+          SUM(hand_count) AS totalHandCount,
+          AVG(hand_count) AS avgHandCount,
+          MIN(hand_count) AS minHandCount,
+          MAX(hand_count) AS maxHandCount,
+          SUM(byte_length) AS totalPackBytes,
+          AVG(byte_length) AS avgPackBytes,
+          MIN(byte_length) AS minPackBytes,
+          MAX(byte_length) AS maxPackBytes
+        FROM ${quoteIdentifier(info.tableName)}
+      `)
+      .get() as {
+        packCount: number;
+        actionSchemaCount: number;
+        totalHandCount: number | null;
+        avgHandCount: number | null;
+        minHandCount: number | null;
+        maxHandCount: number | null;
+        totalPackBytes: number | null;
+        avgPackBytes: number | null;
+        minPackBytes: number | null;
+        maxPackBytes: number | null;
+      };
+
+    if (stats.packCount === 0) continue;
+
+    const binFileBytes = fileBytesByName.get(info.binFile) ?? 0;
+    const totalPackBytes = stats.totalPackBytes ?? 0;
+
+    rows.push({
+      strategy: info.strategy,
+      playerCount: info.playerCount,
+      depthBb: info.depthBb,
+      binFile: info.binFile,
       binFileBytes,
-      indexToFileBytesRatio: safeRatio(row.totalPackBytes, binFileBytes),
-    };
-  });
+      packCount: stats.packCount,
+      actionSchemaCount: stats.actionSchemaCount,
+      totalHandCount: stats.totalHandCount ?? 0,
+      avgHandCount: stats.avgHandCount ?? 0,
+      minHandCount: stats.minHandCount ?? 0,
+      maxHandCount: stats.maxHandCount ?? 0,
+      totalPackBytes,
+      avgPackBytes: stats.avgPackBytes ?? 0,
+      minPackBytes: stats.minPackBytes ?? 0,
+      maxPackBytes: stats.maxPackBytes ?? 0,
+      indexToFileBytesRatio: safeRatio(totalPackBytes, binFileBytes),
+    });
+  }
+
+  return rows;
 }
 
 function getActionSchemaStats(db: Database): ActionSchemaStats {
@@ -198,26 +259,41 @@ function getActionSchemaStats(db: Database): ActionSchemaStats {
 }
 
 function getTotals(db: Database): BinaryAnalysisReport["totals"] {
-  const row = db
-    .query(`
-      SELECT
-        COUNT(*) AS packCount,
-        COUNT(DISTINCT action_schema_id) AS actionSchemaCount,
-        SUM(hand_count) AS totalHandCount,
-        SUM(byte_length) AS totalPackBytes,
-        AVG(byte_length) AS avgPackBytes,
-        AVG(hand_count) AS avgHandCount
-      FROM range_pack_index
-    `)
-    .get() as BinaryAnalysisReport["totals"];
+  let packCount = 0;
+  let actionSchemaCount = 0;
+  let totalHandCount = 0;
+  let totalPackBytes = 0;
+
+  for (const info of getIndexTables(db)) {
+    const row = db
+      .query(`
+        SELECT
+          COUNT(*) AS packCount,
+          COUNT(DISTINCT action_schema_id) AS actionSchemaCount,
+          SUM(hand_count) AS totalHandCount,
+          SUM(byte_length) AS totalPackBytes
+        FROM ${quoteIdentifier(info.tableName)}
+      `)
+      .get() as {
+      packCount: number | null;
+      actionSchemaCount: number | null;
+      totalHandCount: number | null;
+      totalPackBytes: number | null;
+    };
+
+    packCount += row.packCount ?? 0;
+    actionSchemaCount += row.actionSchemaCount ?? 0;
+    totalHandCount += row.totalHandCount ?? 0;
+    totalPackBytes += row.totalPackBytes ?? 0;
+  }
 
   return {
-    packCount: row.packCount ?? 0,
-    actionSchemaCount: row.actionSchemaCount ?? 0,
-    totalHandCount: row.totalHandCount ?? 0,
-    totalPackBytes: row.totalPackBytes ?? 0,
-    avgPackBytes: row.avgPackBytes ?? 0,
-    avgHandCount: row.avgHandCount ?? 0,
+    packCount,
+    actionSchemaCount,
+    totalHandCount,
+    totalPackBytes,
+    avgPackBytes: safeRatio(totalPackBytes, packCount),
+    avgHandCount: safeRatio(totalHandCount, packCount),
   };
 }
 
@@ -338,3 +414,5 @@ ${report.notes.map((note) => `- ${note}`).join("\n")}
 function sum(values: number[]): number {
   return values.reduce((total, value) => total + value, 0);
 }
+
+

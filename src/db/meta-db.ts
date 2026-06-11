@@ -1,4 +1,11 @@
 import { Database } from "bun:sqlite";
+import {
+  getBinFileName,
+  getConcreteLinesTableName,
+  getRangePackIndexTableName,
+  getDrillScenarioTableName,
+  quoteIdentifier,
+} from "./naming";
 
 export interface ConcreteLineRow {
   concrete_line_id: number;
@@ -7,7 +14,6 @@ export interface ConcreteLineRow {
 }
 
 export interface RangePackIndexRow {
-  strategy: string;
   player_count: number;
   depth_bb: number;
   concrete_line_id: number;
@@ -39,17 +45,17 @@ export class MetaDb {
     playerCount: number;
     drillDepth?: number;
   }): string[] {
+    const tableName = quoteIdentifier(getDrillScenarioTableName(params.strategy ?? "default"));
     const rows = this.db
       .query(`
         SELECT abstract_line
-        FROM drill_scenario_lines
-        WHERE strategy = ?
-          AND drill_name = ?
+        FROM ${tableName}
+        WHERE drill_name = ?
           AND player_count = ?
           AND drill_depth = ?
         ORDER BY abstract_line
       `)
-      .all(params.strategy ?? "default", params.drillName, params.playerCount, params.drillDepth ?? 0) as Array<{
+      .all(params.drillName, params.playerCount, params.drillDepth ?? 0) as Array<{
       abstract_line: string;
     }>;
 
@@ -62,17 +68,17 @@ export class MetaDb {
     depthBb: number;
     abstractLine: string;
   }): ConcreteLineRow[] {
+    const tableName = quoteIdentifier(
+      getConcreteLinesTableName(params.strategy ?? "default", params.playerCount, params.depthBb),
+    );
     return this.db
       .query(`
         SELECT concrete_line_id, abstract_line, concrete_line
-        FROM concrete_lines
-        WHERE strategy = ?
-          AND player_count = ?
-          AND depth_bb = ?
-          AND abstract_line = ?
+        FROM ${tableName}
+        WHERE abstract_line = ?
         ORDER BY concrete_line_id
       `)
-      .all(params.strategy ?? "default", params.playerCount, params.depthBb, params.abstractLine) as ConcreteLineRow[];
+      .all(params.abstractLine) as ConcreteLineRow[];
   }
 
   getRangePackIndex(params: {
@@ -81,19 +87,26 @@ export class MetaDb {
     depthBb: number;
     concreteLineId: number;
   }): RangePackIndexRow | null {
-    return (this.db
+    const strategy = params.strategy ?? "default";
+    const tableName = quoteIdentifier(getRangePackIndexTableName(strategy, params.playerCount, params.depthBb));
+
+    const row = this.db
       .query(`
-        SELECT strategy, player_count, depth_bb, concrete_line_id, action_schema_id,
-               hand_count, offset, byte_length, checksum, bin_file
-        FROM range_pack_index
-        WHERE strategy = ?
-          AND player_count = ?
-          AND depth_bb = ?
-          AND concrete_line_id = ?
+        SELECT concrete_line_id, action_schema_id,
+               hand_count, offset, byte_length, checksum
+        FROM ${tableName}
+        WHERE concrete_line_id = ?
       `)
-      .get(params.strategy ?? "default", params.playerCount, params.depthBb, params.concreteLineId) as
-      | RangePackIndexRow
-      | null);
+      .get(params.concreteLineId) as Omit<RangePackIndexRow, "player_count" | "depth_bb" | "bin_file"> | null;
+
+    if (!row) return null;
+
+    return {
+      ...row,
+      player_count: params.playerCount,
+      depth_bb: params.depthBb,
+      bin_file: getBinFileName(strategy, params.playerCount, params.depthBb),
+    };
   }
 
   getActionSchema(actionSchemaId: number): ActionSchemaRow | null {

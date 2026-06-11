@@ -1,13 +1,13 @@
 {
-  "generatedAt": "2026-06-11T14:49:57.314Z",
+  "generatedAt": "2026-06-11T15:51:11.285Z",
   "binaryDir": "range-db/binary",
   "metaDbPath": "range-db\\binary\\meta.db",
   "files": {
     "metaDb": {
       "name": "meta.db",
       "path": "range-db\\binary\\meta.db",
-      "bytes": 193196032,
-      "human": "184.25 MB"
+      "bytes": 91234304,
+      "human": "87.01 MB"
     },
     "rangeBins": [
       {
@@ -65,12 +65,12 @@
         "human": "60.29 MB"
       }
     ],
-    "totalBytes": 465306800,
-    "totalHuman": "443.75 MB"
+    "totalBytes": 363345072,
+    "totalHuman": "346.51 MB"
   },
   "totals": {
     "packCount": 521134,
-    "actionSchemaCount": 19404,
+    "actionSchemaCount": 24225,
     "totalHandCount": 7331472,
     "totalPackBytes": 272110624,
     "avgPackBytes": 522.1509707675953,
@@ -89,6 +89,7 @@
       "playerCount": 6,
       "depthBb": 100,
       "binFile": "ranges_default_6max_100BB.bin",
+      "binFileBytes": 2172204,
       "packCount": 3737,
       "actionSchemaCount": 613,
       "totalHandCount": 58908,
@@ -99,7 +100,6 @@
       "avgPackBytes": 581.2651859780573,
       "minPackBytes": 21,
       "maxPackBytes": 11661,
-      "binFileBytes": 2172204,
       "indexToFileBytesRatio": 0.99999263420931
     },
     {
@@ -107,6 +107,7 @@
       "playerCount": 6,
       "depthBb": 200,
       "binFile": "ranges_default_6max_200BB.bin",
+      "binFileBytes": 1666509,
       "packCount": 2363,
       "actionSchemaCount": 673,
       "totalHandCount": 44065,
@@ -117,7 +118,6 @@
       "avgPackBytes": 705.2446043165468,
       "minPackBytes": 21,
       "maxPackBytes": 8957,
-      "binFileBytes": 1666509,
       "indexToFileBytesRatio": 0.9999903990917541
     },
     {
@@ -125,6 +125,7 @@
       "playerCount": 6,
       "depthBb": 300,
       "binFile": "ranges_default_6max_300BB.bin",
+      "binFileBytes": 1390341,
       "packCount": 1816,
       "actionSchemaCount": 726,
       "totalHandCount": 36841,
@@ -135,7 +136,6 @@
       "avgPackBytes": 765.5974669603524,
       "minPackBytes": 21,
       "maxPackBytes": 10309,
-      "binFileBytes": 1390341,
       "indexToFileBytesRatio": 0.999988492031811
     },
     {
@@ -143,6 +143,7 @@
       "playerCount": 8,
       "depthBb": 100,
       "binFile": "ranges_default_8max_100BB.bin",
+      "binFileBytes": 4635494,
       "packCount": 8892,
       "actionSchemaCount": 1019,
       "totalHandCount": 125670,
@@ -153,7 +154,6 @@
       "avgPackBytes": 521.3088169140801,
       "minPackBytes": 21,
       "maxPackBytes": 11661,
-      "binFileBytes": 4635494,
       "indexToFileBytesRatio": 0.9999965483721908
     },
     {
@@ -161,6 +161,7 @@
       "playerCount": 8,
       "depthBb": 200,
       "binFile": "ranges_default_8max_200BB.bin",
+      "binFileBytes": 3438513,
       "packCount": 5454,
       "actionSchemaCount": 1049,
       "totalHandCount": 93029,
@@ -171,7 +172,6 @@
       "avgPackBytes": 630.454162082875,
       "minPackBytes": 21,
       "maxPackBytes": 10309,
-      "binFileBytes": 3438513,
       "indexToFileBytesRatio": 0.9999953468257936
     },
     {
@@ -179,6 +179,7 @@
       "playerCount": 8,
       "depthBb": 300,
       "binFile": "ranges_default_8max_300BB.bin",
+      "binFileBytes": 2865913,
       "packCount": 3643,
       "actionSchemaCount": 1017,
       "totalHandCount": 76885,
@@ -189,7 +190,6 @@
       "avgPackBytes": 786.6859730990941,
       "minPackBytes": 21,
       "maxPackBytes": 11661,
-      "binFileBytes": 2865913,
       "indexToFileBytesRatio": 0.9999944171368775
     },
     {
@@ -197,6 +197,7 @@
       "playerCount": 9,
       "depthBb": 100,
       "binFile": "ranges_default_9max_100BB.bin",
+      "binFileBytes": 83756612,
       "packCount": 197087,
       "actionSchemaCount": 4073,
       "totalHandCount": 2356140,
@@ -207,7 +208,6 @@
       "avgPackBytes": 424.97270748451194,
       "minPackBytes": 21,
       "maxPackBytes": 10309,
-      "binFileBytes": 83756612,
       "indexToFileBytesRatio": 0.9999998089703055
     },
     {
@@ -215,6 +215,7 @@
       "playerCount": 9,
       "depthBb": 200,
       "binFile": "ranges_default_9max_200BB.bin",
+      "binFileBytes": 108969070,
       "packCount": 203028,
       "actionSchemaCount": 7878,
       "totalHandCount": 2895478,
@@ -225,7 +226,6 @@
       "avgPackBytes": 536.7193392044447,
       "minPackBytes": 21,
       "maxPackBytes": 11661,
-      "binFileBytes": 108969070,
       "indexToFileBytesRatio": 0.9999998531693443
     },
     {
@@ -233,6 +233,7 @@
       "playerCount": 9,
       "depthBb": 300,
       "binFile": "ranges_default_9max_300BB.bin",
+      "binFileBytes": 63216112,
       "packCount": 95114,
       "actionSchemaCount": 7177,
       "totalHandCount": 1644456,
@@ -243,19 +244,18 @@
       "avgPackBytes": 664.6350274407553,
       "minPackBytes": 21,
       "maxPackBytes": 11661,
-      "binFileBytes": 63216112,
       "indexToFileBytesRatio": 0.9999997468999675
     }
   ],
   "comparison": {
     "sqliteTotalBytes": 1517780992,
     "sqliteTotalHuman": "1.41 GB",
-    "binaryTotalBytes": 465306800,
-    "binaryTotalHuman": "443.75 MB",
-    "savedBytes": 1052474192,
-    "savedHuman": "1003.72 MB",
-    "binaryToSqliteRatio": 0.3065704488675004,
-    "reductionRatio": 0.6934295511324996,
+    "binaryTotalBytes": 363345072,
+    "binaryTotalHuman": "346.51 MB",
+    "savedBytes": 1154435920,
+    "savedHuman": "1.08 GB",
+    "binaryToSqliteRatio": 0.23939229303512058,
+    "reductionRatio": 0.7606077069648794,
     "sqliteRangeRows": 23806716
   },
   "notes": [

@@ -20,17 +20,31 @@ Drill 场景 -> 抽象行动线 -> 具体行动线 -> 手牌策略数据
 本项目转换后的结构是：
 
 ```text
-SQLite meta.db:
-  drill_scenario_lines
-  concrete_lines
+SQLite meta.db (分表优化版):
+  drill_scenario_lines_{strategy}
+  concrete_lines_{strategy}_{playerCount}max_{depthBb}BB
+  range_pack_index_{strategy}_{playerCount}max_{depthBb}BB
   action_schemas
-  range_pack_index
 
 Binary ranges_*.bin:
   hand_ids
   action_masks
   frequency / hand_ev Float32 matrix
 ```
+
+### 数据库分表优化设计
+
+为了最大化节省空间并提升查询效率，`meta.db` 中的 `concrete_lines` 和 `range_pack_index` 表已按 **维度（strategy + playerCount + depthBb）** 拆分为具体子表：
+
+1. **`concrete_lines_{strategy}_{playerCount}max_{depthBb}BB`**:
+   * 去除了冗余的 `player_count` 和 `depth_bb` 列（直接从表名推导）。
+   * `concrete_line_id` 设为 `INTEGER PRIMARY KEY`，启用 SQLite 的 rowid 别名，消除了主键 B-Tree 的额外存储开销。
+   * `UNIQUE` 约束从 4 列缩短到 2 列：`UNIQUE(abstract_line, concrete_line)`，索引树更加紧凑。
+
+2. **`range_pack_index_{strategy}_{playerCount}max_{depthBb}BB`**:
+   * 去除了冗余的 `player_count`、`depth_bb` 以及 `bin_file` 列（均由对应的表名和维度直接推导）。
+   * `concrete_line_id` 同样作为 `INTEGER PRIMARY KEY` 以零额外开销存储。
+   * 存储的列仅包含：`action_schema_id`、`hand_count`、`offset`、`byte_length`、`checksum`。
 
 查询时先通过 `meta.db` 找到某个 `concrete_line_id` 对应的 `offset + byte_length`，再从 `ranges_*.bin` 中随机读取该 pack，解码成旧接口可使用的 action 策略结果。
 
@@ -331,8 +345,8 @@ ranges_default_9max_300BB.bin
 部署或后端读取时，需要保证：
 
 - `meta.db` 存在。
-- 查询参数中的 `strategy/playerCount/depthBb` 能匹配到 `range_pack_index`。
-- `meta.db` 中记录的 `bin_file` 在同一个 `--dir` 目录下存在。
+- 能够通过 `strategy / playerCount / depthBb` 匹配到对应的 `range_pack_index_{strategy}_{playerCount}max_{depthBb}BB` 表。
+- 根据维度推导出的二进制数据文件 `ranges_{strategy}_{playerCount}max_{depthBb}BB.bin` 在同一个 `--dir` 目录下存在。
 - hand 代码必须来自固定 169 手牌字典，例如 `AA`、`AKs`、`AKo`、`22`。
 
 ## 开发注意事项
