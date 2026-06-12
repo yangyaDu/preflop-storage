@@ -9,4 +9,5 @@ export * from "./db/naming";
 export * from "./hand/hand-dict";
 export * from "./importer/build-binary-store";
 export * from "./importer/old-sqlite";
+export * from "./query/errors";
 export * from "./query/preflop-query-service";

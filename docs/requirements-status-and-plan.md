@@ -238,7 +238,7 @@ tests/test-cases.md
 | 数据转换工具 | 部分完成 | 可构建，但缺少断点续跑、完整统计、内置校验报告 |
 | 支持失败中断后重新执行 | 未完成 | 当前主要依赖 `--overwrite` 重建，不是断点续跑 |
 | 转换后校验 | 部分完成 | 已新增 sample/full 校验工具，待基于真实数据生成正式 sample/full 报告 |
-| 查询 SDK | 部分完成 | 已有基础 SDK，缺少业务错误码和批量查询接口 |
+| 查询 SDK | 部分完成 | 已新增业务错误码、batch API、场景级查询入口和 SDK 文档；仍需基于真实业务路径验证接口覆盖度 |
 | Benchmark 报告 | 未完成 | 未产出 P50 / P95 / P99 |
 | 数据体积对比 | 未完成 | 已有生成物，但未形成正式统计报告 |
 | 内存占用对比 | 未完成 | 需要工具统计冷启动、热缓存内存 |
@@ -531,7 +531,10 @@ reports/verify-full.md
 - 已对比 `hole_cards`、`action_name`、`action_size`、`amount_bb`、`frequency`、`hand_ev`。
 - 已内置 Float32 误差阈值：`frequency <= 1e-6`，`hand_ev <= 1e-5`。
 - 已输出 JSON 和 Markdown 报告，并在发现失败记录或 pack 读取失败时返回非 0 退出码。
-- 当前仓库未包含 `range-db/range.db` 和 `range-db/binary/`，因此正式 `reports/verify-sample.md` / `reports/verify-full.md` 需要在真实数据存在后运行命令生成。
+- 已基于当前 `range-db/range.db` 和 `range-db/binary/` 生成 `reports/verify-sample.md` / `reports/verify-full.md`。
+- sample 校验通过：10,000 条旧记录全部成功，失败 0，pack 读取失败 0。
+- full 校验在严格 `hand_ev <= 1e-5` 阈值下未完全通过：23,806,716 条旧记录中成功 23,806,646 条，失败 70 条，均集中在 `default:9max:300BB` 的 `AA / raise`，最大 `hand_ev` 误差为 `0.0000152587890625`。
+- full 校验中 `frequency` 最大误差为 `2.9802321499516893e-8`，二进制额外记录数 0，pack 读取失败数 0。
 
 ### 阶段 3：完善查询 SDK
 
@@ -553,6 +556,16 @@ reports/verify-full.md
 src/query/
 docs/query-sdk.md
 ```
+
+当前最新进度：
+
+- 已新增 `src/query/errors.ts`，提供 `PreflopQueryError` 和稳定错误码。
+- 已新增 `getHandStrategyOrThrow()`，用于需要业务错误码的单手牌查询。
+- 已新增 `getHandStrategiesBatch()`，批量查询返回逐项 `strategy/error` 稳定结构。
+- 已新增 `getScenarioConcreteLines()` 和 `getScenarioHandStrategies()`，封装 `drill_name -> abstract_line -> concrete_line -> strategy` 查询链路。
+- 已新增可选 `packCacheSize`，支持解码后 range pack 的简单 LRU 缓存；原有 action schema cache 保留。
+- 已新增 `docs/query-sdk.md`。
+- 待补充：基于真实业务高频路径验证场景级参数命名和返回结构是否完全满足接入侧。
 
 ### 阶段 4：Benchmark
 

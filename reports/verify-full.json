@@ -1,0 +1,533 @@
+{
+  "generatedAt": "2026-06-12T06:22:14.593Z",
+  "sourceDbPath": "range-db/range.db",
+  "binaryDir": "range-db/binary",
+  "metaDbPath": "range-db\\binary\\meta.db",
+  "mode": "full",
+  "tolerances": {
+    "actionSize": 0.000001,
+    "amountBB": 0.000001,
+    "frequency": 0.000001,
+    "handEV": 0.00001
+  },
+  "totals": {
+    "checkedConcreteLines": 521134,
+    "checkedOldRecords": 23806716,
+    "successOldRecords": 23806646,
+    "failedOldRecords": 70,
+    "extraBinaryRecords": 0,
+    "packReadFailures": 0,
+    "maxFrequencyError": 2.9802321499516893e-8,
+    "maxHandEvError": 0.0000152587890625,
+    "dimensions": 9,
+    "failedRecords": 70
+  },
+  "dimensions": [
+    {
+      "dimension": "default:6max:100BB",
+      "checkedConcreteLines": 3737,
+      "checkedOldRecords": 194021,
+      "successOldRecords": 194021,
+      "failedOldRecords": 0,
+      "extraBinaryRecords": 0,
+      "packReadFailures": 0,
+      "maxFrequencyError": 2.9801891621161758e-8,
+      "maxHandEvError": 0.0000013113021850585938
+    },
+    {
+      "dimension": "default:6max:200BB",
+      "checkedConcreteLines": 2363,
+      "checkedOldRecords": 142742,
+      "successOldRecords": 142742,
+      "failedOldRecords": 0,
+      "extraBinaryRecords": 0,
+      "packReadFailures": 0,
+      "maxFrequencyError": 2.9801236811621834e-8,
+      "maxHandEvError": 0.0000036954879760742188
+    },
+    {
+      "dimension": "default:6max:300BB",
+      "checkedConcreteLines": 1816,
+      "checkedOldRecords": 114488,
+      "successOldRecords": 114488,
+      "failedOldRecords": 0,
+      "extraBinaryRecords": 0,
+      "packReadFailures": 0,
+      "maxFrequencyError": 2.980040170186271e-8,
+      "maxHandEvError": 0.000003814697265625
+    },
+    {
+      "dimension": "default:8max:100BB",
+      "checkedConcreteLines": 8892,
+      "checkedOldRecords": 398839,
+      "successOldRecords": 398839,
+      "failedOldRecords": 0,
+      "extraBinaryRecords": 0,
+      "packReadFailures": 0,
+      "maxFrequencyError": 2.9801452750000124e-8,
+      "maxHandEvError": 0.0000019073486328125
+    },
+    {
+      "dimension": "default:8max:200BB",
+      "checkedConcreteLines": 5454,
+      "checkedOldRecords": 283878,
+      "successOldRecords": 283878,
+      "failedOldRecords": 0,
+      "extraBinaryRecords": 0,
+      "packReadFailures": 0,
+      "maxFrequencyError": 2.9802243672882867e-8,
+      "maxHandEvError": 0.0000036954879760742188
+    },
+    {
+      "dimension": "default:8max:300BB",
+      "checkedConcreteLines": 3643,
+      "checkedOldRecords": 225292,
+      "successOldRecords": 225292,
+      "failedOldRecords": 0,
+      "extraBinaryRecords": 0,
+      "packReadFailures": 0,
+      "maxFrequencyError": 2.9800091283505026e-8,
+      "maxHandEvError": 0.0000038146972514141453
+    },
+    {
+      "dimension": "default:9max:100BB",
+      "checkedConcreteLines": 197087,
+      "checkedOldRecords": 7666604,
+      "successOldRecords": 7666604,
+      "failedOldRecords": 0,
+      "extraBinaryRecords": 0,
+      "packReadFailures": 0,
+      "maxFrequencyError": 2.980231506022335e-8,
+      "maxHandEvError": 0.000003814697265625
+    },
+    {
+      "dimension": "default:9max:200BB",
+      "checkedConcreteLines": 203028,
+      "checkedOldRecords": 9594303,
+      "successOldRecords": 9594303,
+      "failedOldRecords": 0,
+      "extraBinaryRecords": 0,
+      "packReadFailures": 0,
+      "maxFrequencyError": 2.980230018323482e-8,
+      "maxHandEvError": 0.00000762939453125
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "checkedConcreteLines": 95114,
+      "checkedOldRecords": 5186549,
+      "successOldRecords": 5186479,
+      "failedOldRecords": 70,
+      "extraBinaryRecords": 0,
+      "packReadFailures": 0,
+      "maxFrequencyError": 2.9802321499516893e-8,
+      "maxHandEvError": 0.0000152587890625
+    }
+  ],
+  "failures": [
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 10268,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=264.3915557861328, binary=264.39154052734375, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 12876,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=276.2884063720703, binary=276.28839111328125, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 12999,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=268.9251251220703, binary=268.92510986328125, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 13041,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=272.3891143798828, binary=272.38909912109375, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 15957,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=260.9138946533203, binary=260.91387939453125, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 16014,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=273.1565399169922, binary=273.15655517578125, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 54533,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=263.6796112060547, binary=263.67962646484375, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 54539,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=281.2248992919922, binary=281.22491455078125, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 54560,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=274.48182678222656, binary=274.4818115234375, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 54561,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=283.55397033691406, binary=283.553955078125, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 54570,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=264.32518005371094, binary=264.3251953125, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 54618,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=269.91990661621094, binary=269.919921875, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 54657,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=266.6521759033203, binary=266.65216064453125, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 54709,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=275.38587951660156, binary=275.3858642578125, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 54740,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=280.5611114501953, binary=280.56109619140625, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 54764,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=263.5344696044922, binary=263.53448486328125, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 54777,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=271.9306182861328, binary=271.93060302734375, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 54779,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=290.13194274902344, binary=290.1319580078125, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 54784,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=279.0478057861328, binary=279.04779052734375, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 54785,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=289.0269012451172, binary=289.02691650390625, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 54815,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=276.5813446044922, binary=276.58135986328125, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 54838,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=273.95286560058594, binary=273.952880859375, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 54843,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=264.45262145996094, binary=264.45263671875, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 54844,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=276.0971221923828, binary=276.09710693359375, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 54850,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=283.6719512939453, binary=283.67193603515625, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 54881,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=268.6384735107422, binary=268.63848876953125, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 54983,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=266.0364532470703, binary=266.03643798828125, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 55003,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=305.6346893310547, binary=305.63470458984375, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 55135,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=291.51600646972656, binary=291.5159912109375, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 55198,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=268.5120086669922, binary=268.51202392578125, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 55475,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=269.72984313964844, binary=269.7298583984375, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 55496,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=287.9462432861328, binary=287.94622802734375, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 55542,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=285.0281219482422, binary=285.02813720703125, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 57300,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=271.3563690185547, binary=271.35638427734375, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 57732,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=281.1646270751953, binary=281.16461181640625, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 63374,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=263.28480529785156, binary=263.2847900390625, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 63399,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=263.2848358154297, binary=263.28485107421875, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 64518,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=256.5437469482422, binary=256.54376220703125, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 64523,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=272.10450744628906, binary=272.1044921875, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 64621,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=269.99159240722656, binary=269.9915771484375, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 67660,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=264.7552032470703, binary=264.75518798828125, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 67801,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=260.5946807861328, binary=260.59466552734375, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 67928,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=266.5386199951172, binary=266.53863525390625, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 75603,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=281.31468200683594, binary=281.314697265625, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 75913,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=269.95518493652344, binary=269.9552001953125, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 76100,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=289.42967224121094, binary=289.4296875, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 76345,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=281.21910095214844, binary=281.2191162109375, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 76380,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=284.62391662597656, binary=284.6239013671875, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 76824,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=288.73753356933594, binary=288.737548828125, error=0.0000152587890625"
+    },
+    {
+      "dimension": "default:9max:300BB",
+      "concreteLineId": 79158,
+      "holeCards": "AA",
+      "actionName": "raise",
+      "reason": "HAND_EV_MISMATCH",
+      "details": "old=267.1006317138672, binary=267.10064697265625, error=0.0000152587890625"
+    }
+  ],
+  "repairSuggestions": [
+    "确认二进制目录由当前 source SQLite 重新构建，避免 meta.db 与 ranges_*.bin 来自不同版本。",
+    "使用 --verify-checksum 或本命令重新扫描，优先排查 ranges_*.bin 是否损坏。",
+    "如出现大量 ACTION_NOT_FOUND_IN_SCHEMA，检查 action_name 规范化和 action_size / amount_bb 的 Float32 精度策略。"
+  ]
+}

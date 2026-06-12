@@ -260,7 +260,9 @@ range_data_default_9max_300BB
 ```ts
 import { PreflopQueryService } from "./src/query/preflop-query-service";
 
-const service = new PreflopQueryService("range-db/binary/meta.db", "range-db/binary");
+const service = new PreflopQueryService("range-db/binary/meta.db", "range-db/binary", {
+  packCacheSize: 256,
+});
 
 const strategy = await service.getHandStrategy({
   strategy: "default",
@@ -272,6 +274,47 @@ const strategy = await service.getHandStrategy({
 
 await service.close();
 ```
+
+严格错误码接口：
+
+```ts
+const strategy = await service.getHandStrategyOrThrow({
+  strategy: "default",
+  playerCount: 6,
+  depthBb: 100,
+  concreteLineId: 1,
+  holeCards: "22",
+});
+```
+
+批量查询：
+
+```ts
+const batch = await service.getHandStrategiesBatch({
+  strategy: "default",
+  playerCount: 6,
+  depthBb: 100,
+  requests: [
+    { concreteLineId: 1, holeCards: "AA" },
+    { concreteLineId: 1, holeCards: "AKs" },
+  ],
+});
+```
+
+场景级查询：
+
+```ts
+const scenarioStrategies = await service.getScenarioHandStrategies({
+  strategy: "default",
+  drillName: "BTN vs BB",
+  playerCount: 6,
+  drillDepth: 0,
+  depthBb: 100,
+  holeCards: "AKs",
+});
+```
+
+更完整的 SDK 说明见 `docs/query-sdk.md`。
 
 也可以查询完整 range：
 
