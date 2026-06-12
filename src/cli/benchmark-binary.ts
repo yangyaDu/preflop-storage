@@ -22,8 +22,6 @@ const mdPath = getStringArg(args, "md", "reports/benchmark-binary.md");
 const seed = getNumberArg(args, "seed", 42);
 const defaultIterations = getNumberArg(args, "iterations", 1000);
 const handIterations = getNumberArg(args, "hand-iterations", defaultIterations);
-const fullRangeIterations = getNumberArg(args, "full-range-iterations", Math.min(defaultIterations, 200));
-const drillIterations = getNumberArg(args, "drill-iterations", Math.min(defaultIterations, 200));
 const batchIterations = getNumberArg(args, "batch-iterations", Math.min(defaultIterations, 200));
 const batchSize = getNumberArg(args, "batch-size", 20);
 const warmupIterations = getNumberArg(args, "warmup-iterations", 20);
@@ -37,8 +35,6 @@ const workload = createBenchmarkWorkload({
   requestedDimensions,
   seed,
   handIterations,
-  fullRangeIterations,
-  drillIterations,
   batchIterations,
   batchSize,
 });
@@ -58,6 +54,8 @@ const memoryBefore = getMemorySnapshot();
 const runner = new BinaryBenchmarkRunner(metaDbPath, binaryDir, runnerOptions);
 
 try {
+  await runner.warmup(workload.dimensions);
+
   const cases = [
     await measureBenchmarkCase({
       name: "hand-strategy",
@@ -65,20 +63,6 @@ try {
       items: workload.handQueries,
       warmupIterations,
       operation: (item) => runner.getHandStrategy(item),
-    }),
-    await measureBenchmarkCase({
-      name: "full-range",
-      description: "Read and decode all hands/actions for one concrete_line_id.",
-      items: workload.fullRangeQueries,
-      warmupIterations,
-      operation: (item) => runner.getFullRange(item),
-    }),
-    await measureBenchmarkCase({
-      name: "drill-random",
-      description: "Resolve drill_name to abstract/concrete lines, then query one hand.",
-      items: workload.drillQueries,
-      warmupIterations,
-      operation: (item) => runner.getDrillScenarioHandStrategies(item),
     }),
     await measureBenchmarkCase({
       name: "batch-hand-strategy",
@@ -100,8 +84,6 @@ try {
       seed,
       requestedDimensions: requestedDimensionValues,
       handIterations,
-      fullRangeIterations,
-      drillIterations,
       batchIterations,
       batchSize,
       warmupIterations,
@@ -111,8 +93,6 @@ try {
     workload: {
       dimensions: workload.dimensions,
       handQueries: workload.handQueries.length,
-      fullRangeQueries: workload.fullRangeQueries.length,
-      drillQueries: workload.drillQueries.length,
       batchQueries: workload.batchQueries.length,
       batchSize: workload.batchSize,
     },

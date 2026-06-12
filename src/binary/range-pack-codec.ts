@@ -182,3 +182,157 @@ export function decodeRangePack(params: {
 
   return { handIds, actionMasks, cells };
 }
+
+/**
+ * 按需解码：只解析指定 handId 的策略数据。
+ *
+ * 与 decodeRangePack 全量解码的对比：
+ * - 全量：读 845 字节 → 分配 169 handIds + 169 masks + 1690 cells
+ * - 按需：读 845 字节 → 直接访问 Uint8Array 找 handId → 只解码目标手牌 ~10 cell
+ *
+ * 使用直接 TypedArray 访问替代 DataView，避免 per-byte 方法调用开销。
+ *
+ * @param params 解码参数（bytes、handCount、actionCount），外加目标 handId
+ * @returns 目标手牌的单元格数组，若未找到返回空数组
+ */
+export function decodeRangePackForHand(params: {
+  bytes: Uint8Array;
+  handCount: number;
+  actionCount: number;
+  targetHandId: number;
+}): DecodedCell[] {
+  const { bytes, handCount, actionCount, targetHandId } = params;
+  const expectedLength = getRangePackByteLength(handCount, actionCount);
+  if (bytes.byteLength !== expectedLength) {
+    throw new Error(`Invalid pack length: expected ${expectedLength}, got ${bytes.byteLength}`);
+  }
+
+  // 步骤 1：二分查找 handId（handIds 按升序排列，最多 169 个）
+  let lo = 0;
+  let hi = handCount - 1;
+  let localHandIndex = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1;
+    const val = bytes[mid];
+    if (val < targetHandId) { lo = mid + 1; }
+    else if (val > targetHandId) { hi = mid - 1; }
+    else { localHandIndex = mid; break; }
+  }
+  if (localHandIndex === -1) return [];
+
+  // 步骤 2：通过 Uint32Array 或 DataView 读取 actionMask（masks 在 handIds 之后）
+  const maskOffset = handCount;
+  const maskByteOffset = bytes.byteOffset + maskOffset;
+  const maskAligned = maskByteOffset % 4 === 0;
+  let mask: number;
+  if (maskAligned) {
+    const maskView = new Uint32Array(bytes.buffer, maskByteOffset, handCount);
+    mask = maskView[localHandIndex];
+  } else {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    mask = view.getUint32(maskOffset + localHandIndex * 4, true);
+  }
+
+  // 步骤 3：通过 Float32Array 或 DataView 读取 cell 数据
+  const cellsStart = handCount + handCount * 4;
+  const floatsPerHand = actionCount * 2;
+  const cellByteOffset = cellsStart + localHandIndex * floatsPerHand * 4;
+  // 检查 cell 数据起始是否 float32 对齐（4 字节）
+  const absoluteCellOffset = bytes.byteOffset + cellByteOffset;
+  const cellsAligned = absoluteCellOffset % 4 === 0;
+
+  const cells: DecodedCell[] = [];
+
+  if (cellsAligned) {
+    const floatCount = handCount * floatsPerHand;
+    const values = new Float32Array(bytes.buffer, absoluteCellOffset, floatCount);
+    const baseIndex = localHandIndex * floatsPerHand;
+    for (let actionId = 0; actionId < actionCount; actionId++) {
+      const idx = baseIndex + actionId * 2;
+      cells.push({
+        handId: targetHandId,
+        actionId,
+        exists: hasMaskBit(mask, actionId),
+        frequency: values[idx],
+        handEV: Number.isNaN(values[idx + 1]) ? null : values[idx + 1],
+      });
+    }
+  } else {
+    const cellView = new DataView(bytes.buffer, bytes.byteOffset + cellByteOffset, actionCount * 8);
+    for (let actionId = 0; actionId < actionCount; actionId++) {
+      const cellOffset = actionId * 8;
+      const frequency = cellView.getFloat32(cellOffset, true);
+      const rawHandEV = cellView.getFloat32(cellOffset + 4, true);
+      cells.push({
+        handId: targetHandId,
+        actionId,
+        exists: hasMaskBit(mask, actionId),
+        frequency,
+        handEV: Number.isNaN(rawHandEV) ? null : rawHandEV,
+      });
+    }
+  }
+
+  return cells;
+}
+
+/**
+ * 掩码匹配：只解析 handIds 和 actionMasks，按 targetActionIds 匹配，
+ * 返回匹配的手牌 ID 列表（不解析 cell 数据段）。
+ *
+ * 使用直接 TypedArray 访问替代 DataView，避免 per-byte 方法调用开销。
+ *
+ * @param params 解码参数（bytes、handCount、actionCount），外加 targetActionIds
+ * @returns 匹配的手牌 handId 数组
+ */
+export function decodeRangePackMaskMatch(params: {
+  bytes: Uint8Array;
+  handCount: number;
+  actionCount: number;
+  targetActionIds: number[];
+}): number[] {
+  const { bytes, handCount, actionCount, targetActionIds } = params;
+  const expectedLength = getRangePackByteLength(handCount, actionCount);
+  if (bytes.byteLength !== expectedLength) {
+    throw new Error(`Invalid pack length: expected ${expectedLength}, got ${bytes.byteLength}`);
+  }
+
+  if (targetActionIds.length === 0) {
+    // 空条件 = 匹配所有手牌
+    const handIds: number[] = [];
+    for (let i = 0; i < handCount; i++) {
+      handIds.push(bytes[i]);
+    }
+    return handIds;
+  }
+
+  // 计算目标掩码：所有 targetActionIds 的位都要置1
+  let targetMask = 0;
+  for (const actionId of targetActionIds) {
+    targetMask = setMaskBit(targetMask, actionId);
+  }
+
+  // 通过 Uint32Array 或 DataView 读取 actionMasks
+  const maskOffset = handCount;
+  const maskByteOffset = bytes.byteOffset + maskOffset;
+  const maskAligned = maskByteOffset % 4 === 0;
+  const result: number[] = [];
+
+  if (maskAligned) {
+    const maskView = new Uint32Array(bytes.buffer, maskByteOffset, handCount);
+    for (let handIndex = 0; handIndex < handCount; handIndex++) {
+      if ((maskView[handIndex] & targetMask) === targetMask) {
+        result.push(bytes[handIndex]);
+      }
+    }
+  } else {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    for (let handIndex = 0; handIndex < handCount; handIndex++) {
+      if ((view.getUint32(maskOffset + handIndex * 4, true) & targetMask) === targetMask) {
+        result.push(bytes[handIndex]);
+      }
+    }
+  }
+
+  return result;
+}

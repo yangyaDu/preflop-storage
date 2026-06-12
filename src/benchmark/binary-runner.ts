@@ -1,10 +1,9 @@
+import { getBinFileName } from "../db/naming";
 import { PreflopQueryService } from "../query/preflop-query-service";
 import {
   type BatchBenchmarkItem,
   type ColdStartResult,
   getMemorySnapshot,
-  type DrillBenchmarkItem,
-  type FullRangeBenchmarkItem,
   type HandBenchmarkItem,
 } from "./common";
 
@@ -27,6 +26,20 @@ export class BinaryBenchmarkRunner {
     });
   }
 
+  async warmup(dimensions: string[]): Promise<void> {
+    for (const key of dimensions) {
+      const parts = key.split(":");
+      if (parts.length !== 3) continue;
+      const strategy = parts[0];
+      const playerCount = Number(parts[1].replace("max", ""));
+      const depthBb = Number(parts[2].replace("BB", ""));
+
+      this.service.metaDb.loadIndexCache(strategy, playerCount, depthBb);
+      const binFile = getBinFileName(strategy, playerCount, depthBb);
+      await this.service.getReader(binFile);
+    }
+  }
+
   async getHandStrategy(item: HandBenchmarkItem): Promise<number> {
     const strategy = await this.service.getHandStrategy({
       strategy: item.strategy,
@@ -37,30 +50,6 @@ export class BinaryBenchmarkRunner {
     });
 
     return strategy?.actions.length ?? 0;
-  }
-
-  async getFullRange(item: FullRangeBenchmarkItem): Promise<number> {
-    const range = await this.service.getFullRange({
-      strategy: item.strategy,
-      playerCount: item.playerCount,
-      depthBb: item.depthBb,
-      concreteLineId: item.concreteLineId,
-    });
-
-    return range.reduce((total, hand) => total + hand.actions.length, 0);
-  }
-
-  async getDrillScenarioHandStrategies(item: DrillBenchmarkItem): Promise<number> {
-    const strategies = await this.service.getScenarioHandStrategies({
-      strategy: item.strategy,
-      drillName: item.drillName,
-      playerCount: item.playerCount,
-      drillDepth: item.drillDepth,
-      depthBb: item.depthBb,
-      holeCards: item.holeCards,
-    });
-
-    return strategies.reduce((total, line) => total + line.strategy.actions.length, 0);
   }
 
   async getHandStrategiesBatch(item: BatchBenchmarkItem): Promise<number> {

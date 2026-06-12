@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import {
+  dimensionKey,
   getBinFileName,
   getConcreteLinesTableName,
   getRangePackIndexTableName,
@@ -34,6 +35,7 @@ export interface ActionSchemaRow {
 
 export class MetaDb {
   private readonly db: Database;
+  private readonly indexCache = new Map<string, Map<number, RangePackIndexRow>>();
 
   constructor(path: string, options: { readonly?: boolean } = {}) {
     this.db = new Database(path, { readonly: options.readonly ?? true });
@@ -88,25 +90,27 @@ export class MetaDb {
     concreteLineId: number;
   }): RangePackIndexRow | null {
     const strategy = params.strategy ?? "default";
-    const tableName = quoteIdentifier(getRangePackIndexTableName(strategy, params.playerCount, params.depthBb));
+    const map = this.loadIndexCache(strategy, params.playerCount, params.depthBb);
+    return map.get(params.concreteLineId) ?? null;
+  }
 
-    const row = this.db
-      .query(`
-        SELECT concrete_line_id, action_schema_id,
-               hand_count, offset, byte_length, checksum
-        FROM ${tableName}
-        WHERE concrete_line_id = ?
-      `)
-      .get(params.concreteLineId) as Omit<RangePackIndexRow, "player_count" | "depth_bb" | "bin_file"> | null;
+  getRangePackIndexBatch(params: {
+    strategy?: string;
+    playerCount: number;
+    depthBb: number;
+    concreteLineIds: number[];
+  }): RangePackIndexRow[] {
+    if (params.concreteLineIds.length === 0) return [];
 
-    if (!row) return null;
+    const strategy = params.strategy ?? "default";
+    const map = this.loadIndexCache(strategy, params.playerCount, params.depthBb);
 
-    return {
-      ...row,
-      player_count: params.playerCount,
-      depth_bb: params.depthBb,
-      bin_file: getBinFileName(strategy, params.playerCount, params.depthBb),
-    };
+    const result: RangePackIndexRow[] = [];
+    for (const id of params.concreteLineIds) {
+      const row = map.get(id);
+      if (row) result.push(row);
+    }
+    return result;
   }
 
   getActionSchema(actionSchemaId: number): ActionSchemaRow | null {
@@ -126,6 +130,36 @@ export class MetaDb {
   }
 
   close(): void {
+    this.indexCache.clear();
     this.db.close();
+  }
+
+  public loadIndexCache(strategy: string, playerCount: number, depthBb: number): Map<number, RangePackIndexRow> {
+    const key = dimensionKey({ strategy, playerCount, depthBb });
+    const cached = this.indexCache.get(key);
+    if (cached) return cached;
+
+    const tableName = quoteIdentifier(getRangePackIndexTableName(strategy, playerCount, depthBb));
+    const binFile = getBinFileName(strategy, playerCount, depthBb);
+
+    const rows = this.db
+      .query(`
+        SELECT concrete_line_id, action_schema_id, hand_count, offset, byte_length, checksum
+        FROM ${tableName}
+      `)
+      .all() as Array<Omit<RangePackIndexRow, "player_count" | "depth_bb" | "bin_file">>;
+
+    const map = new Map<number, RangePackIndexRow>();
+    for (const row of rows) {
+      map.set(row.concrete_line_id, {
+        ...row,
+        player_count: playerCount,
+        depth_bb: depthBb,
+        bin_file: binFile,
+      });
+    }
+
+    this.indexCache.set(key, map);
+    return map;
   }
 }

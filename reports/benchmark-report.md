@@ -1,33 +1,31 @@
 # Benchmark 对比报告
 
-生成时间：2026-06-12T12:57:22.803Z
+生成时间：2026-06-12T17:58:04.400Z
 
 ## 总览
 
 - SQLite 报告：`reports/benchmark-sqlite.json`
 - 二进制报告：`reports/benchmark-binary.json`
-- SQLite 报告生成时间：2026-06-12T12:56:34.675Z
-- 二进制报告生成时间：2026-06-12T12:57:06.285Z
+- SQLite 报告生成时间：2026-06-12T17:57:30.166Z
+- 二进制报告生成时间：2026-06-12T17:57:35.182Z
 - workload 是否一致：是
-- SQLite 冷启动首查：15.53 ms
-- 二进制冷启动首查：27.85 ms
-- 二进制 / SQLite 冷启动：179.25%
+- SQLite 冷启动首查：15.02 ms
+- 二进制冷启动首查：230.33 ms
+- 二进制 / SQLite 冷启动：1533.31%
 
 ## 延迟与吞吐
 
 | case | sqlite avg | binary avg | avg ratio | sqlite p95 | binary p95 | p95 ratio | sqlite qps | binary qps | qps ratio |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| batch-hand-strategy | 1.019 ms | 19.16 ms | 1880.13% | 1.736 ms | 28.26 ms | 1627.91% | 980.56 | 52.19 | 0.05x |
-| drill-random | 16.38 ms | 254.78 ms | 1555.02% | 65.75 ms | 1.57 s | 2393.89% | 61.03 | 3.92 | 0.06x |
-| full-range | 0.493 ms | 1.405 ms | 285.04% | 1.367 ms | 2.363 ms | 172.83% | 2027.13 | 711.54 | 0.35x |
-| hand-strategy | 0.059 ms | 1.684 ms | 2841.88% | 0.148 ms | 3.147 ms | 2127.99% | 16785.56 | 593.29 | 0.04x |
+| batch-hand-strategy | 0.932 ms | 3.545 ms | 380.32% | 1.279 ms | 6.100 ms | 476.87% | 1071.99 | 281.99 | 0.26x |
+| hand-strategy | 0.059 ms | 0.362 ms | 610.86% | 0.105 ms | 0.611 ms | 584.61% | 16798.93 | 2758.93 | 0.16x |
 
 ## 内存
 
-- SQLite RSS 变化：24.16 MB
-- 二进制 RSS 变化：103.48 MB
+- SQLite RSS 变化：6.94 MB
+- 二进制 RSS 变化：261.53 MB
 - SQLite heap used 变化：0 B
-- 二进制 heap used 变化：31.21 MB
+- 二进制 heap used 变化：182.24 MB
 
 ## 说明
 
