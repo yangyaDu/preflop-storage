@@ -233,17 +233,17 @@ tests/test-cases.md
 | 当前查询模式分析 | 部分完成 | 已支持核心查询，但未测真实业务高频路径 |
 | 至少 2 种候选方案对比 | 未完成 | 需要对比 SQLite 优化、纯二进制、混合方案等 |
 | 每种方案体积预估 | 未完成 | 需要基于真实数据抽样和全量统计 |
-| 每种方案性能预估 | 未完成 | 需要 benchmark 或实验数据 |
+| 每种方案性能预估 | 部分完成 | 已新增 SQLite vs 二进制 benchmark 工具和当前样本报告；仍缺少方案 A/B/C 的完整实验对照 |
 | 最终方案选择 | 部分完成 | 已实现方向 C 原型，但缺少正式论证报告 |
 | 数据转换工具 | 部分完成 | 可构建，但缺少断点续跑、完整统计、内置校验报告 |
 | 支持失败中断后重新执行 | 未完成 | 当前主要依赖 `--overwrite` 重建，不是断点续跑 |
 | 转换后校验 | 部分完成 | 已新增 sample/full 校验工具，待基于真实数据生成正式 sample/full 报告 |
 | 查询 SDK | 部分完成 | 已新增业务错误码、batch API、场景级查询入口和 SDK 文档；仍需基于真实业务路径验证接口覆盖度 |
-| Benchmark 报告 | 未完成 | 未产出 P50 / P95 / P99 |
+| Benchmark 报告 | 部分完成 | 已产出 SQLite、二进制和对比报告，包含 P50 / P95 / P99 / QPS |
 | 数据体积对比 | 未完成 | 已有生成物，但未形成正式统计报告 |
-| 内存占用对比 | 未完成 | 需要工具统计冷启动、热缓存内存 |
-| 冷启动查询表现 | 未完成 | 需要 benchmark |
-| 热缓存查询表现 | 未完成 | 需要缓存策略和 benchmark |
+| 内存占用对比 | 部分完成 | benchmark 报告已输出 RSS / heap used 前后变化；仍需更严格的独立进程和峰值内存统计 |
+| 冷启动查询表现 | 部分完成 | 已记录打开 DB / 文件后的首次 hand query；未清理 OS 文件缓存 |
+| 热缓存查询表现 | 部分完成 | 已记录进程打开后的查询表现并支持二进制 pack cache；仍需专门的 cache-hit benchmark |
 | 接入说明 | 部分完成 | README 已有基础说明，缺少版本发布和回滚 |
 | 数据版本校验 | 部分完成 | 二进制 header 有版本，缺少整体 manifest |
 | 数据损坏检测机制 | 部分完成 | pack 有 CRC32C，校验工具已支持读取时扫描 checksum，仍缺少发布级损坏检测报告 |
@@ -415,6 +415,28 @@ bun run benchmark:sqlite
 bun run benchmark:binary
 bun run benchmark:compare
 ```
+
+当前最新进度：
+
+- 已新增 `src/benchmark/common.ts`、`src/benchmark/sqlite-runner.ts`、`src/benchmark/binary-runner.ts`。
+- 已新增 `src/cli/benchmark-sqlite.ts`、`src/cli/benchmark-binary.ts`、`src/cli/benchmark-compare.ts`。
+- 已新增 npm scripts：`benchmark:sqlite`、`benchmark:binary`、`benchmark:compare`、`benchmark`。
+- 已覆盖单手牌查询、完整 range 查询、drill 随机场景查询、batch 查询。
+- 已输出平均耗时、P50、P95、P99、最大耗时、QPS、错误数、返回 action 数、RSS / heap used 变化、冷启动首查耗时。
+- 当前报告已生成：
+
+```text
+reports/benchmark-sqlite.json
+reports/benchmark-sqlite.md
+reports/benchmark-binary.json
+reports/benchmark-binary.md
+reports/benchmark-report.json
+reports/benchmark-report.md
+```
+
+- 当前全维度样本参数：`seed=42`，单手牌 200 次，完整 range 50 次，drill 30 次，batch 50 次，`batch-size=20`，warmup 10 次，二进制 `pack-cache-size=4096`。
+- 当前样本错误数：SQLite 0，二进制 0。
+- 当前样本结果显示二进制查询路径尚未达到“不慢于 SQLite”：点查、batch 和 drill 链路明显慢于旧 SQLite；后续应优先优化 meta 查询、文件读取、batch 合并读取、drill 场景缓存和 pack cache 命中率。
 
 ### 4.6 接入、版本和回滚
 
@@ -670,6 +692,30 @@ bun run src/cli/query-hand.ts --dir range-db/binary --player-count 6 --depth-bb 
 bun run src/cli/query-hand.ts --dir range-db/binary --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand 22 --verify-checksum
 ```
 
+Benchmark SQLite：
+
+```powershell
+bun run benchmark:sqlite
+```
+
+Benchmark 二进制：
+
+```powershell
+bun run benchmark:binary
+```
+
+生成 Benchmark 对比报告：
+
+```powershell
+bun run benchmark:compare
+```
+
+一键执行 Benchmark：
+
+```powershell
+bun run benchmark
+```
+
 ## 8. 下一步推荐立即执行
 
 最建议马上做这三个文件：
@@ -751,4 +797,73 @@ reports/verify-sample.json
 reports/verify-sample.md
 reports/verify-full.json
 reports/verify-full.md
+```
+
+## 11. 阶段 4 Benchmark 工具已落地命令
+
+阶段 4 已新增 SQLite、二进制和对比 benchmark 工具。
+
+运行旧 SQLite benchmark：
+
+```powershell
+bun run benchmark:sqlite --source range-db/range.db --out reports/benchmark-sqlite.json --md reports/benchmark-sqlite.md
+```
+
+运行新二进制 benchmark：
+
+```powershell
+bun run benchmark:binary --source range-db/range.db --dir range-db/binary --out reports/benchmark-binary.json --md reports/benchmark-binary.md
+```
+
+生成对比报告：
+
+```powershell
+bun run benchmark:compare --sqlite reports/benchmark-sqlite.json --binary reports/benchmark-binary.json --out reports/benchmark-report.json --md reports/benchmark-report.md
+```
+
+一键执行：
+
+```powershell
+bun run benchmark
+```
+
+当前默认输出：
+
+```text
+reports/benchmark-sqlite.json
+reports/benchmark-sqlite.md
+reports/benchmark-binary.json
+reports/benchmark-binary.md
+reports/benchmark-report.json
+reports/benchmark-report.md
+```
+
+当前已生成的全维度样本报告使用：
+
+```powershell
+bun run benchmark:sqlite --iterations 200 --full-range-iterations 50 --drill-iterations 30 --batch-iterations 50 --batch-size 20 --warmup-iterations 10
+bun run benchmark:binary --iterations 200 --full-range-iterations 50 --drill-iterations 30 --batch-iterations 50 --batch-size 20 --warmup-iterations 10 --pack-cache-size 4096
+bun run benchmark:compare
+```
+
+当前样本摘要：
+
+```text
+维度：default 6max/8max/9max，100BB/200BB/300BB
+SQLite 错误数：0
+二进制错误数：0
+SQLite 冷启动首查：15.53 ms
+二进制冷启动首查：27.85 ms
+hand-strategy P95：SQLite 0.148 ms，二进制 3.147 ms
+full-range P95：SQLite 1.367 ms，二进制 2.363 ms
+drill-random P95：SQLite 65.75 ms，二进制 1.57 s
+batch-hand-strategy P95：SQLite 1.736 ms，二进制 28.26 ms
+```
+
+当前结论：
+
+```text
+Benchmark 工具和报告已经落地。
+当前查询 SDK 路径尚未满足“不慢于 SQLite”的性能目标。
+下一步应进入查询性能优化，而不是直接宣称性能验收通过。
 ```
