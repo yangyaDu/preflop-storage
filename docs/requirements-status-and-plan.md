@@ -237,7 +237,7 @@ tests/test-cases.md
 | 最终方案选择 | 部分完成 | 已实现方向 C 原型，但缺少正式论证报告 |
 | 数据转换工具 | 部分完成 | 可构建，但缺少断点续跑、完整统计、内置校验报告 |
 | 支持失败中断后重新执行 | 未完成 | 当前主要依赖 `--overwrite` 重建，不是断点续跑 |
-| 转换后校验 | 未完成 | 只有基础 codec 测试，未做新旧全量对比 |
+| 转换后校验 | 部分完成 | 已新增 sample/full 校验工具，待基于真实数据生成正式 sample/full 报告 |
 | 查询 SDK | 部分完成 | 已有基础 SDK，缺少业务错误码和批量查询接口 |
 | Benchmark 报告 | 未完成 | 未产出 P50 / P95 / P99 |
 | 数据体积对比 | 未完成 | 已有生成物，但未形成正式统计报告 |
@@ -246,7 +246,7 @@ tests/test-cases.md
 | 热缓存查询表现 | 未完成 | 需要缓存策略和 benchmark |
 | 接入说明 | 部分完成 | README 已有基础说明，缺少版本发布和回滚 |
 | 数据版本校验 | 部分完成 | 二进制 header 有版本，缺少整体 manifest |
-| 数据损坏检测机制 | 部分完成 | pack 有 CRC32C，缺少全量扫描校验工具 |
+| 数据损坏检测机制 | 部分完成 | pack 有 CRC32C，校验工具已支持读取时扫描 checksum，仍缺少发布级损坏检测报告 |
 
 ## 4. 后续必须完成的工作
 
@@ -524,6 +524,15 @@ reports/verify-sample.md
 reports/verify-full.md
 ```
 
+当前最新进度：
+
+- 已新增 `src/cli/verify-binary.ts`。
+- 已支持 `--mode sample` 和 `--mode full`。
+- 已对比 `hole_cards`、`action_name`、`action_size`、`amount_bb`、`frequency`、`hand_ev`。
+- 已内置 Float32 误差阈值：`frequency <= 1e-6`，`hand_ev <= 1e-5`。
+- 已输出 JSON 和 Markdown 报告，并在发现失败记录或 pack 读取失败时返回非 0 退出码。
+- 当前仓库未包含 `range-db/range.db` 和 `range-db/binary/`，因此正式 `reports/verify-sample.md` / `reports/verify-full.md` 需要在真实数据存在后运行命令生成。
+
 ### 阶段 3：完善查询 SDK
 
 目标：
@@ -698,4 +707,35 @@ reports/sqlite-analysis.json
 reports/sqlite-analysis.md
 reports/binary-analysis.json
 reports/storage-analysis.md
+```
+
+## 10. 阶段 2 校验工具已落地命令
+
+阶段 2 已新增二进制一致性校验工具。
+
+随机抽样校验：
+
+```powershell
+bun run verify:binary --source range-db/range.db --dir range-db/binary --mode sample --sample-size 10000 --out reports/verify-sample.json --md reports/verify-sample.md
+```
+
+全量校验：
+
+```powershell
+bun run verify:binary --source range-db/range.db --dir range-db/binary --mode full --out reports/verify-full.json --md reports/verify-full.md
+```
+
+只校验单个维度：
+
+```powershell
+bun run verify:binary --source range-db/range.db --dir range-db/binary --mode sample --dimension default:6:100
+```
+
+默认输出：
+
+```text
+reports/verify-sample.json
+reports/verify-sample.md
+reports/verify-full.json
+reports/verify-full.md
 ```

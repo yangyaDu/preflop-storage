@@ -153,6 +153,13 @@ bun run analyze:binary --dir range-db/binary --sqlite-report reports/sqlite-anal
 bun run analyze
 ```
 
+校验新旧数据一致性：
+
+```powershell
+bun run verify:binary --source range-db/range.db --dir range-db/binary --mode sample --sample-size 10000
+bun run verify:binary --source range-db/range.db --dir range-db/binary --mode full
+```
+
 构建完整二进制库：
 
 ```powershell

@@ -9,6 +9,7 @@
     "analyze:sqlite": "bun run src/cli/analyze-sqlite.ts",
     "analyze:binary": "bun run src/cli/analyze-binary.ts",
     "analyze": "bun run analyze:sqlite && bun run analyze:binary --sqlite-report reports/sqlite-analysis.json --md reports/storage-analysis.md",
+    "verify:binary": "bun run src/cli/verify-binary.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
