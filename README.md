@@ -1,13 +1,24 @@
 # Preflop Storage
 
-Preflop Storage 是一个基于 Bun + TypeScript 的德州扑克翻前策略二进制存储项目。
+Preflop Storage 是一个基于 Bun + TypeScript + Rust (napi-rs) 的德州扑克翻前策略二进制存储项目。
 
 项目目标是把旧 SQLite 中逐行保存的 range 策略数据，转换为：
 
 - `meta.db`：保存场景、抽象行动线、具体行动线、action schema、二进制文件索引。
 - `ranges_*.bin`：保存真实手牌策略矩阵，使用固定 Float32 little-endian 二进制格式。
 
-这样可以保留原来的三层查询能力，同时减少 SQLite 行式数据带来的体积膨胀。
+查询热路径（.idx 二分查找 + pack 解码）使用 **Rust napi-rs 原生插件**，较 JS 版本提速 16 倍，较原始 SQLite 提速 4.6 倍。
+
+### 性能概览（9 维度全量，9max 为主）
+
+| 方案 | 存储 | 单手牌查询 | 批量查询 | 内存占用 | 冷启动 |
+|---|---|---|---|---|---|
+| SQLite 原版 | 1,447 MB | 0.092 ms | 1.105 ms | +4.8 MB | 17.8 ms |
+| 方案一（SQLite索引+.bin） | 347 MB | 0.346 ms | 4.258 ms | +242 MB | 359 ms |
+| 方案二（.idx+.bin, JS） | 344 MB | 0.303 ms | 3.095 ms | +52 MB | 58.5 ms |
+| **方案二 + Rust（当前）** | **344 MB** | **0.020 ms** | **0.298 ms** | **+4.3 MB** | **27.1 ms** |
+
+> 详细对比见 `docs/requirements-status-and-plan.md` 第 12 节。
 
 ## 项目主题
 
@@ -56,14 +67,27 @@ preflop-storage/
   tsconfig.json
   README.md
 
+  native-addon/                 # Rust napi-rs 原生插件
+    Cargo.toml
+    src/
+      lib.rs                    # DimensionHandle 导出
+      idx_reader.rs             # mmap .idx + 二分查找
+      bin_reader.rs             # mmap .bin 零拷贝读取
+      pack_codec.rs             # 核心 pack 解码（热路径）
+      crc32c.rs                 # 编译期 CRC32C 查找表
+      types.rs                  # 二进制格式类型 + napi 对象
+    index.js                    # 平台分发入口
+    index.d.ts                  # TypeScript 类型声明
+
   range-db/
-    range.db                    # 旧 SQLite 源数据
-    binary/                     # 完整二进制生成目录
+    range.db                    # 旧 SQLite 源数据（1.4 GB）
+    binary/                     # 方案一生成目录（.bin 文件）
       meta.db
-      ranges_default_6max_100BB.bin
-      ranges_default_6max_200BB.bin
-      ...
-    binary-smoke/               # 小样本验证目录
+      ranges_default_*.bin
+    binary-scheme2/             # 方案二生成目录（.idx + .bin 文件）
+      meta.db
+      ranges_default_*.idx
+      ranges_default_*.bin
 
   src/
     binary/                     # 二进制格式、pack、header、CRC、reader/writer
@@ -71,23 +95,33 @@ preflop-storage/
     db/                         # meta.db 表结构与查询封装
     hand/                       # 169 手牌字典
     importer/                   # 旧 SQLite -> 二进制库构建器
-    query/                      # 线上读取查询服务
+    query/                      # 方案一查询服务 (PreflopQueryService)
+    benchmark/                  # 通用 benchmark 基础设施
+    scheme1/                    # 方案一：db / importer / query / benchmark
+    scheme2/                    # 方案二：db / idx / query / benchmark
     index.ts                    # 模块统一导出
 
   tests/
-    binary-codec.test.ts
-```
+
+  docs/
+    requirements-status-and-plan.md   # 项目进度与四方案对比
+    query-sdk.md                      # 查询 SDK 文档
+    notes/                            # 架构调研与技术笔记
+
+  reports/                     # 分析、校验、benchmark 报告
 
 ## 运行环境与依赖
 
 需要安装：
 
 - Bun 1.3 或更高版本
+- Rust 工具链（仅构建 native-addon 时需要）：rustc + cargo
 
-项目没有线上运行依赖，主要依赖 Bun 内置能力：
+项目运行时依赖 Bun 内置能力：
 
 - `bun:sqlite`：Bun 内置 SQLite
 - `node:fs/promises`：文件随机读写
+- `native-addon/`：Rust napi-rs 编译生成的 `.node` 二进制（提供 `DimensionHandle`）
 
 开发阶段会安装以下 devDependencies：
 
@@ -103,6 +137,12 @@ preflop-storage/
 bun install
 ```
 
+构建原生插件（仅在 native-addon 源码修改后需要）：
+
+```powershell
+cd native-addon && cargo test && napi build --release
+```
+
 确认 Bun 可用：
 
 ```powershell
@@ -111,83 +151,56 @@ bun --version
 
 ## 常用命令
 
-运行测试：
+### 质量检查
 
 ```powershell
-bun test
+bun test                    # 运行测试（22 个 TS 测试 + 17 个 Rust 测试）
+bun run typecheck           # TypeScript 类型检查
+bun run lint                # ESLint 静态检查
+bun run check               # 一键：typecheck + lint + test
 ```
 
-运行 TypeScript 类型检查：
+### 构建
 
 ```powershell
-bun run typecheck
-```
-
-运行 lint 检查：
-
-```powershell
-bun run lint
-```
-
-运行完整质量检查：
-
-```powershell
-bun run check
-```
-
-分析旧 SQLite 数据：
-
-```powershell
-bun run analyze:sqlite --source range-db/range.db --out reports/sqlite-analysis.json --md reports/sqlite-analysis.md
-```
-
-分析新二进制数据，并生成体积对比报告：
-
-```powershell
-bun run analyze:binary --dir range-db/binary --sqlite-report reports/sqlite-analysis.json --out reports/binary-analysis.json --md reports/storage-analysis.md
-```
-
-一次性运行阶段 1 分析：
-
-```powershell
-bun run analyze
-```
-
-校验新旧数据一致性：
-
-```powershell
-bun run verify:binary --source range-db/range.db --dir range-db/binary --mode sample --sample-size 10000
-bun run verify:binary --source range-db/range.db --dir range-db/binary --mode full
-```
-
-构建完整二进制库：
-
-```powershell
-bun run src/cli/build-binary.ts --source range-db/range.db --out range-db/binary --overwrite
-```
-
-也可以使用 package script：
-
-```powershell
+# 方案一构建（SQLite 索引 + .bin）
 bun run build:binary --source range-db/range.db --out range-db/binary --overwrite
+
+# 方案二构建（.idx 独立索引 + .bin + 精简 meta.db）
+bun run build:scheme2 --source range-db/range.db --out range-db/binary-scheme2 --overwrite
+
+# 构建单个维度小样本
+bun run build:binary --source range-db/range.db --out range-db/binary-smoke --dimension default:6:100 --max-packs 3 --overwrite
 ```
 
-构建单个维度的小样本，用于快速验证：
+### 查询
 
 ```powershell
-bun run src/cli/build-binary.ts --source range-db/range.db --out range-db/binary-smoke --dimension default:6:100 --max-packs 3 --overwrite
+# 方案一查询
+bun run query:hand --dir range-db/binary --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand 22
+
+# 方案二查询（使用 .idx + Rust DimensionHandle）
+bun run query:scheme2 --dir range-db/binary-scheme2 --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand 22
+
+# 带 CRC 校验
+bun run query:hand --dir range-db/binary --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand 22 --verify-checksum
 ```
 
-查询单手牌策略：
+### 分析与校验
 
 ```powershell
-bun run src/cli/query-hand.ts --dir range-db/binary --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand 22
+bun run analyze          # 一键：SQLite 分析 + 二进制分析 + 体积对比
+bun run verify:binary    # 抽样校验或全量校验
 ```
 
-带 CRC 校验读取：
+### Benchmark
 
 ```powershell
-bun run src/cli/query-hand.ts --dir range-db/binary --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand 22 --verify-checksum
+bun run benchmark:sqlite                            # SQLite 方案
+bun run benchmark:binary                            # 方案一
+bun run benchmark:scheme2                           # 方案二 + Rust
+bun run benchmark:compare                           # 生成对比报告
+bun run benchmark                                    # 一键：全部
 ```
 
 ## 构建配置
@@ -255,7 +268,56 @@ range_data_default_9max_300BB
 
 ## 代码内读取方式
 
-后端服务中可以直接使用 `PreflopQueryService`：
+### 方案二 + Rust（推荐，性能最优）
+
+```ts
+import { Scheme2QueryService } from "./src/scheme2/query/query-service";
+
+const service = new Scheme2QueryService("range-db/binary-scheme2/meta.db", "range-db/binary-scheme2", {
+  verifyChecksums: false,
+});
+
+// 预热维度（同步调用，Rust DimensionHandle mmap .idx + .bin）
+service.prewarmDimension({ strategy: "default", playerCount: 6, depthBb: 100 });
+
+// 查询手牌策略（同步热路径，Rust 内部完成 二分查找 + 解码）
+const strategy = service.getHandStrategySync({
+  strategy: "default",
+  playerCount: 6,
+  depthBb: 100,
+  concreteLineId: 1,
+  holeCards: "22",
+});
+// → { holeCards: "22", exists: true, actions: [{ actionName: "fold", frequency: 0.0017, ... }] }
+
+// 异步版本（自动预热 + 查询，首次调用时打开文件）
+const strategy2 = await service.getHandStrategy({
+  strategy: "default",
+  playerCount: 6,
+  depthBb: 100,
+  concreteLineId: 2,
+  holeCards: "AA",
+});
+
+// 批量查询（Rust queryBatch 原生支持）
+const batch = await service.getHandStrategiesBatch({
+  strategy: "default",
+  playerCount: 6,
+  depthBb: 100,
+  requests: [
+    { concreteLineId: 1, holeCards: "AA" },
+    { concreteLineId: 1, holeCards: "AKs" },
+  ],
+});
+
+// Drill 场景 → 具体行动线
+const lines = service.getDrillScenarioLines({ drillName: "UTG", playerCount: 6 });
+const concrete = service.getConcreteLines({ playerCount: 6, depthBb: 100, abstractLine: lines[0] });
+
+service.close();
+```
+
+### 方案一（SQLite 索引 + .bin）
 
 ```ts
 import { PreflopQueryService } from "./src/query/preflop-query-service";
@@ -272,12 +334,7 @@ const strategy = await service.getHandStrategy({
   holeCards: "22",
 });
 
-await service.close();
-```
-
-批量查询（自动分组 + 并行读取 + 按需解码）：
-
-```ts
+// 批量查询、按 action 筛选、完整 range 等功能一致
 const batch = await service.getHandStrategiesBatch({
   strategy: "default",
   playerCount: 6,
@@ -287,45 +344,12 @@ const batch = await service.getHandStrategiesBatch({
     { concreteLineId: 1, holeCards: "AKs" },
   ],
 });
+
+await service.close();
 ```
 
-更完整的 SDK 说明见 `docs/query-sdk.md`。
-
-查询 pack 中所有手牌：
-
-```ts
-const allHands = await service.getHandsByAction({
-  strategy: "default",
-  playerCount: 6,
-  depthBb: 100,
-  concreteLineId: 1,
-});
-```
-
-按 action 筛选手牌：
-
-```ts
-const raiseHands = await service.getHandsByAction({
-  strategy: "default",
-  playerCount: 6,
-  depthBb: 100,
-  concreteLineId: 1,
-  actionNames: ["raise"],
-  minFrequency: 0.1,
-});
-```
-
-按多个 action 同时筛选：
-
-```ts
-const raiseAndCallHands = await service.getHandsByAction({
-  strategy: "default",
-  playerCount: 6,
-  depthBb: 100,
-  concreteLineId: 1,
-  actionNames: ["raise", "call"],
-});
-```
+> 方案一和方案二的 API 接口基本一致，差异在于内部查询引擎（SQLite 索引 vs Rust .idx 二分查找）。
+> 完整 SDK 文档见 `docs/query-sdk.md`。
 
 ## 二进制格式
 
@@ -364,32 +388,46 @@ values[..., 1] = hand_ev
 
 ## 生成物说明
 
-完整构建后，`range-db/binary/` 下至少包含：
+### 方案一（`range-db/binary/`）
+
+完整构建后至少包含：
 
 ```text
-meta.db
-ranges_default_6max_100BB.bin
-ranges_default_6max_200BB.bin
-ranges_default_6max_300BB.bin
-ranges_default_8max_100BB.bin
-ranges_default_8max_200BB.bin
-ranges_default_8max_300BB.bin
-ranges_default_9max_100BB.bin
-ranges_default_9max_200BB.bin
-ranges_default_9max_300BB.bin
+meta.db                                   # 87 MB（SQLite 索引 + 元数据）
+ranges_default_{6max,8max,9max}_{100,200,300}BB.bin   # 9 个 .bin，共 ~260 MB
 ```
+
+### 方案二（`range-db/binary-scheme2/`，推荐）
+
+完整构建后至少包含：
+
+```text
+meta.db                                   # 74 MB（精简元数据 + action_schemas）
+ranges_default_{6max,8max,9max}_{100,200,300}BB.idx   # 9 个 .idx，共 ~11 MB
+ranges_default_{6max,8max,9max}_{100,200,300}BB.bin   # 9 个 .bin，共 ~260 MB
+```
+
+> 方案二总量 ~344 MB，为 SQLite 源库 (1,447 MB) 的 24%。
 
 部署或后端读取时，需要保证：
 
 - `meta.db` 存在。
-- 能够通过 `strategy / playerCount / depthBb` 匹配到对应的 `range_pack_index_{strategy}_{playerCount}max_{depthBb}BB` 表。
-- 根据维度推导出的二进制数据文件 `ranges_{strategy}_{playerCount}max_{depthBb}BB.bin` 在同一个 `--dir` 目录下存在。
+- `.idx` 和 `.bin` 文件成对存在。
+- `native-addon/` 已编译生成 `.node` 文件（Rust DimensionHandle 运行时依赖）。
 - hand 代码必须来自固定 169 手牌字典，例如 `AA`、`AKs`、`AKo`、`22`。
 
 ## 开发注意事项
 
+### TypeScript 侧
 - 不要修改 `HANDS_169` 的顺序；顺序变化需要升级二进制版本。
 - 默认线上查询不建议每次校验 CRC；发布前或 debug 时可以打开 `--verify-checksum`。
 - `hand_ev` 为 `null` 时会在二进制中写入 `NaN`，读取时再转回 `null`。
 - frequency 和 hand_ev 使用 Float32 保存，与旧 SQLite REAL 可能存在极小精度差。
 - 原始 `range-db/range.db` 不会被 builder 原地修改。
+
+### Rust 侧
+- 修改 `native-addon/src/*.rs` 后必须重新编译：`cd native-addon && cargo test && napi build --release`
+- Rust 测试独立于 Bun 测试：`cd native-addon && cargo test`
+- `.idx` / `.bin` 文件格式变更需要同步更新 Rust `types.rs` 和 TypeScript `idx-types.ts`
+- `napi build` 生成的 `index.js` 会根据 `process.config` 自动选择 `win32-x64-msvc.node` / `linux-x64-gnu.node` 等平台变体
+- CRC32C 查找表在 Rust 编译期计算（`const`），零运行时开销
