@@ -3,7 +3,7 @@ import { decodeActionSchema, encodeActionSchema } from "../src/binary/action-sch
 import { crc32c } from "../src/binary/crc32c";
 import { assertSupportedHeader, decodeFileHeader, encodeFileHeader } from "../src/binary/file-header";
 import { decodeRangePack, decodeRangePackForHand, decodeRangePackMaskMatch, encodeRangePack, setMaskBit } from "../src/binary/range-pack-codec";
-import { encodeConcreteLinePack } from "../src/importer/build-binary-store";
+import { encodeConcreteLinePack } from "../src/importer/encode-pack";
 
 describe("binary codecs", () => {
   test("crc32c matches the standard check value", () => {

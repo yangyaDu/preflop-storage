@@ -33,6 +33,22 @@ export class RangeBinMmapReader {
     return this.data.subarray(offset, offset + byteLength);
   }
 
+  /**
+   * 零分配读取：直接返回底层 buffer + 偏移量 + 长度，不创建中间视图。
+   * 调用方可以自行构造 TypedArray 视图，避免 subarray 分配开销。
+   */
+  readRaw(offset: number, byteLength: number): { buffer: ArrayBufferLike; byteOffset: number; byteLength: number } {
+    if (!this.data) throw new Error("RangeBinMmapReader is not opened");
+    if (offset < this.headerSize) throw new Error(`Invalid range pack offset: ${offset}`);
+    if (byteLength < 0) throw new Error(`Invalid byte length: ${byteLength}`);
+
+    return {
+      buffer: this.data.buffer,
+      byteOffset: this.data.byteOffset + offset,
+      byteLength,
+    };
+  }
+
   close(): void {
     this.data = null;
   }

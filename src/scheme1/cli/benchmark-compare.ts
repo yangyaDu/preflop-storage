@@ -1,13 +1,13 @@
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import { formatBytes, formatPercent, markdownTable, safeRatio } from "../analysis/format";
+import { formatBytes, formatPercent, markdownTable, safeRatio } from "../../analysis/format";
 import {
   formatMs,
   readBenchmarkReport,
   type BenchmarkCaseResult,
   type BenchmarkRunReport,
-} from "../benchmark/common";
-import { getStringArg, parseCliArgs } from "./args";
+} from "../../benchmark/common";
+import { getStringArg, parseCliArgs } from "../../cli/args";
 
 interface CaseComparison {
   name: string;

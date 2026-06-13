@@ -11,21 +11,36 @@
 
 **现状：** 二进制存储方案的单手策略 P95 延迟为 3.15ms，而旧 SQLite 方案仅为 0.148ms（21x 慢）。drill-random 查询差距更大：二进制 1.57s vs SQLite 65.75ms（24x 慢）。
 
-**已实施优化（2026-06-13）：**
+**已实施优化 — 第一轮（2026-06-13）解码与查询层：**
 - MetaDb 引入 per-dimension prepared statement 缓存，消除 SQL 编译开销
 - 新增 `decodeRangePackForHand()` 按需解码（只解析目标手牌 ~10 cell，而非全量 1690 cell）
 - 新增 `decodeRangePackMaskMatch()` 掩码匹配（不解析 cell 数据段）
 - `getHandStrategiesBatch` 重写：按 concreteLineId 分组 + 批量 SQL 查询 + 并行读取 pack
-- 删除 `getFullRange`（合并到 `getHandsByAction`）、`getScenarioHandStrategies` 等冗余 API
-- 删除 `getHandStrategyOrThrow`（一行包装，调用方自行 `?? throw`）
 
-**影响：** 按需解码将 pack 读取的码本分配从 1690 cells 降至 ~10 cells，配合 prepared stmt 缓存和 batch 并行化，大幅降低查询延迟。需重新跑 benchmark 验证提升幅度。
+**已实施优化 — 第二轮（2026-06-13）内存管理层：**
+- P1：新建 `RangeBinFileReader`（按需 `fs.readSync`），替大文件 `Bun.file().bytes()` 全量加载
+  - < 10 MB .bin → `RangeBinMmapReader`（全量 mmap）
+  - >= 10 MB .bin → `RangeBinFileReader`（按需 readSync + OS cache）
+- P2：移除 meta.db 中 `concrete_lines_*` 表（495K 行 / 77.6 MB 无用数据）→ meta.db 74MB → ~300KB
+- P3：benchmark warmup 从串行改为 `Promise.all` 并行
 
-**建议方向：**
-1. ~~使用真实工作负载做 profile，定位瓶颈在 I/O 还是计算~~（已完成：确定为全量解码 + SQL 编译）
-2. ~~`MetaDb` 引入连接池或长连接~~（已完成：prepared statement 缓存）
-3. 考虑 `mmap` / `fadvise` 对二进制文件的适用性
-4. 补充 OS 冷启动测试（清除 page cache 后测试）
+**第二轮优化效果：**
+
+| 指标 | SQLite | 方案一 | 方案二（优化前） | 方案二（优化后） |
+|---|---|---|---|---|
+| hand-strategy | 0.092ms | 0.346ms | 0.303ms | 0.333ms |
+| 冷启动 | 17.80ms | 359.52ms | 58ms | 17.39ms |
+| RSS 增加 | 4.55MB | 230.79MB | ~215MB | 52.34MB |
+| Heap 增加 | 0B | 149.79MB | ~214MB | 23.10MB |
+
+详细文档：`docs/notes/scheme2-memory-optimization.md`
+
+**当前状态：内存问题已解决，延迟差距收窄至 3.6x（vs SQLite），仍有优化空间。**
+
+**剩余优化方向（P2 级技术债务）：**
+1. Buffer 对象池：复用 readSync 用的 Buffer，避免每次 `Buffer.alloc()`
+2. ActionResult 对象复用：用 TypedArray 中间格式取代对象数组
+3. 补充 OS 冷启动测试（清除 page cache 后测试）
 
 ---
 

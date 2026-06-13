@@ -1,12 +1,12 @@
 {
-  "generatedAt": "2026-06-12T17:57:30.166Z",
+  "generatedAt": "2026-06-13T06:50:25.956Z",
   "engine": "sqlite",
   "sourceDbPath": "range-db/range.db",
   "options": {
     "seed": 42,
     "requestedDimensions": [],
-    "handIterations": 1000,
-    "batchIterations": 200,
+    "handIterations": 200,
+    "batchIterations": 100,
     "batchSize": 20,
     "warmupIterations": 20
   },
@@ -22,24 +22,24 @@
       "default:9max:200BB",
       "default:9max:300BB"
     ],
-    "handQueries": 1000,
-    "batchQueries": 200,
+    "handQueries": 200,
+    "batchQueries": 100,
     "batchSize": 20
   },
   "coldStart": {
     "operation": "open SQLite and run first hand query",
-    "totalMs": 15.021900000000187,
+    "totalMs": 17.799999999999727,
     "resultCount": 3,
     "memoryBefore": {
-      "rssBytes": 155766784,
-      "heapTotalBytes": 2776064,
+      "rssBytes": 148725760,
+      "heapTotalBytes": 1973248,
       "heapUsedBytes": 244682,
       "externalBytes": 41450,
       "arrayBuffersBytes": 0
     },
     "memoryAfter": {
-      "rssBytes": 155967488,
-      "heapTotalBytes": 2777088,
+      "rssBytes": 148955136,
+      "heapTotalBytes": 1974272,
       "heapUsedBytes": 244682,
       "externalBytes": 41450,
       "arrayBuffersBytes": 0
@@ -49,59 +49,59 @@
     {
       "name": "hand-strategy",
       "description": "Single concrete_line_id + hand query from old SQLite range rows.",
-      "iterations": 1000,
+      "iterations": 200,
       "warmupIterations": 20,
-      "totalMs": 59.52759999999989,
-      "avgMs": 0.05921610000000737,
-      "p50Ms": 0.054099999999834836,
-      "p95Ms": 0.1046000000001186,
-      "p99Ms": 0.1538999999997941,
-      "maxMs": 0.4295999999999367,
-      "qps": 16798.930244122083,
-      "resultCount": 3380,
+      "totalMs": 18.43430000000035,
+      "avgMs": 0.09217150000000174,
+      "p50Ms": 0,
+      "p95Ms": 0,
+      "p99Ms": 0,
+      "maxMs": 0,
+      "qps": 10849.340631322926,
+      "resultCount": 680,
       "errorCount": 0,
       "firstError": null
     },
     {
       "name": "batch-hand-strategy",
       "description": "Run a batch of concrete_line_id + hand lookups.",
-      "iterations": 200,
+      "iterations": 100,
       "warmupIterations": 20,
-      "totalMs": 186.56939999999986,
-      "avgMs": 0.9320475000000215,
-      "p50Ms": 0.876299999999901,
-      "p95Ms": 1.2791000000001986,
-      "p99Ms": 1.5702000000001135,
-      "maxMs": 2.056800000000294,
-      "qps": 1071.9871533059556,
-      "resultCount": 13489,
+      "totalMs": 110.53250000000025,
+      "avgMs": 1.1053250000000026,
+      "p50Ms": 0,
+      "p95Ms": 0,
+      "p99Ms": 0,
+      "maxMs": 0,
+      "qps": 904.7112840114877,
+      "resultCount": 6742,
       "errorCount": 0,
       "firstError": null
     }
   ],
   "totals": {
-    "iterations": 1200,
-    "totalMs": 246.09699999999975,
-    "avgQps": 4876.126080366689,
+    "iterations": 300,
+    "totalMs": 128.9668000000006,
+    "avgQps": 2326.1800711500837,
     "errorCount": 0,
-    "resultCount": 16869
+    "resultCount": 7422
   },
   "memory": {
     "before": {
-      "rssBytes": 155975680,
-      "heapTotalBytes": 2777088,
+      "rssBytes": 148963328,
+      "heapTotalBytes": 1974272,
       "heapUsedBytes": 244682,
       "externalBytes": 41450,
       "arrayBuffersBytes": 0
     },
     "after": {
-      "rssBytes": 163250176,
-      "heapTotalBytes": 5070848,
+      "rssBytes": 153731072,
+      "heapTotalBytes": 3055616,
       "heapUsedBytes": 244682,
       "externalBytes": 41450,
       "arrayBuffersBytes": 0
     },
-    "deltaRssBytes": 7274496,
+    "deltaRssBytes": 4767744,
     "deltaHeapUsedBytes": 0
   },
   "notes": [

@@ -277,6 +277,86 @@ export function decodeRangePackForHand(params: {
 }
 
 /**
+ * 零分配解码：直接使用 buffer + offset 访问，不通过 subarray 创建中间 Uint8Array。
+ *
+ * 二分定位 targetHandId → 读取 mask → 只解码目标手牌的 cell 数据。
+ * 返回紧凑的 `{ actionId, frequency, handEV }` 数组，仅包含存在的 cell。
+ *
+ * @param buffer 整个 .bin 文件的 ArrayBuffer
+ * @param packByteOffset pack 在 buffer 中的起始偏移
+ * @param handCount pack 中的手牌数
+ * @param actionCount pack 中的 action 数
+ * @param targetHandId 目标手牌 ID
+ * @returns 存在的 cell 数组（空数组表示 hand 不在 pack 中）
+ */
+export function decodeRangePackForHandDirect(params: {
+  buffer: ArrayBufferLike;
+  packByteOffset: number;
+  handCount: number;
+  actionCount: number;
+  targetHandId: number;
+}): Array<{ actionId: number; frequency: number; handEV: number | null }> {
+  const { buffer, packByteOffset, handCount, actionCount, targetHandId } = params;
+
+  // 步骤 1：二分查找 handId
+  const handIdView = new Uint8Array(buffer, packByteOffset, handCount);
+  let lo = 0;
+  let hi = handCount - 1;
+  let localHandIndex = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1;
+    const val = handIdView[mid];
+    if (val < targetHandId) { lo = mid + 1; }
+    else if (val > targetHandId) { hi = mid - 1; }
+    else { localHandIndex = mid; break; }
+  }
+  if (localHandIndex === -1) return [];
+
+  // 步骤 2：读取 actionMask（handIds 之后，按 handIndex * 4 偏移）
+  const maskOffset = packByteOffset + handCount + localHandIndex * 4;
+  const maskView = new DataView(buffer, maskOffset, 4);
+  const mask = maskView.getUint32(0, true);
+
+  // 步骤 3：只读取目标手牌的 cell 数据
+  // handIds 是 1 字节 uint8，所以 cell 段起始可能不是 4 字节对齐，需分两路
+  const cellsStart = handCount + handCount * 4;
+  const floatsPerHand = actionCount * 2;
+  const cellByteOffset = packByteOffset + cellsStart + localHandIndex * floatsPerHand * 4;
+  const cellsAligned = cellByteOffset % 4 === 0;
+
+  const result: Array<{ actionId: number; frequency: number; handEV: number | null }> = [];
+
+  if (cellsAligned) {
+    const cellView = new Float32Array(buffer, cellByteOffset, floatsPerHand);
+    for (let actionId = 0; actionId < actionCount; actionId++) {
+      if (((mask >>> actionId) & 1) === 0) continue;
+      const idx = actionId * 2;
+      const handEV = cellView[idx + 1];
+      result.push({
+        actionId,
+        frequency: cellView[idx],
+        handEV: Number.isNaN(handEV) ? null : handEV,
+      });
+    }
+  } else {
+    const cellView = new DataView(buffer, cellByteOffset, floatsPerHand * 4);
+    for (let actionId = 0; actionId < actionCount; actionId++) {
+      if (((mask >>> actionId) & 1) === 0) continue;
+      const cellOffset = actionId * 8;
+      const frequency = cellView.getFloat32(cellOffset, true);
+      const rawHandEV = cellView.getFloat32(cellOffset + 4, true);
+      result.push({
+        actionId,
+        frequency,
+        handEV: Number.isNaN(rawHandEV) ? null : rawHandEV,
+      });
+    }
+  }
+
+  return result;
+}
+
+/**
  * 掩码匹配：只解析 handIds 和 actionMasks，按 targetActionIds 匹配，
  * 返回匹配的手牌 ID 列表（不解析 cell 数据段）。
  *

@@ -1,11 +1,11 @@
 import { Database } from "bun:sqlite";
-import { quoteIdentifier } from "../db/naming";
+import { quoteIdentifier } from "../../db/naming";
 import {
   type BatchBenchmarkItem,
   type ColdStartResult,
   getMemorySnapshot,
   type HandBenchmarkItem,
-} from "./common";
+} from "../../benchmark/common";
 
 interface QueryLike {
   all: (...params: unknown[]) => unknown[];

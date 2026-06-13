@@ -5,7 +5,7 @@ import {
   getRangePackIndexTableName,
   quoteIdentifier,
   type RangeDimension,
-} from "./naming";
+} from "../../db/naming";
 
 export function initBinaryMetaDb(
   db: Database,

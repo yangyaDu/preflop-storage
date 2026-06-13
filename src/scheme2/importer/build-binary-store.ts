@@ -2,28 +2,20 @@ import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { crc32c } from "../../binary/crc32c";
+import { RangeBinWriter } from "../../binary/range-bin-writer";
 import {
-  compareActionDefs,
-  encodeActionSchema,
-  normalizeActionName,
-  type ActionDef,
-} from "../binary/action-schema-codec";
-import { crc32c } from "../binary/crc32c";
-import { RangeBinWriter } from "../binary/range-bin-writer";
-import { encodeRangePack, setMaskBit, type RangeCellValue } from "../binary/range-pack-codec";
-import {
-  getConcreteLinesTableName,
   getDrillScenarioTableName,
-  getRangePackIndexTableName,
   quoteIdentifier,
-  dimensionKey,
   type RangeDimension,
-} from "../db/naming";
-import { initBinaryMetaDb } from "../db/schema";
-import { getHandId } from "../hand/hand-dict";
-import { discoverRangeDimensions, type OldRangeRow } from "./old-sqlite";
+} from "../../db/naming";
+import { discoverRangeDimensions, type OldRangeRow } from "../../importer/old-sqlite";
+import { encodeConcreteLinePack, toHex } from "../../importer/encode-pack";
+import { getIdxFileName } from "../db/naming";
+import { initLightMetaDb } from "../db/schema";
+import { RangeIdxWriter } from "../idx/idx-writer";
 
-export interface BuildBinaryStoreOptions {
+export interface BuildBinaryStoreSchema2Options {
   sourceDbPath: string;
   outDir: string;
   overwrite?: boolean;
@@ -32,23 +24,14 @@ export interface BuildBinaryStoreOptions {
   progressEveryPacks?: number;
 }
 
-interface EncodedConcreteLinePack {
-  actionBlob: Uint8Array;
-  actionCount: number;
-  handCount: number;
-  payload: Uint8Array;
-}
-
 interface BuildStatements {
   insertDrillLineByStrategy: Map<string, ReturnType<Database["prepare"]>>;
-  insertConcreteLineByDimension: Map<string, ReturnType<Database["prepare"]>>;
   selectActionSchema: ReturnType<Database["prepare"]>;
   insertActionSchema: ReturnType<Database["prepare"]>;
   lastInsertId: ReturnType<Database["prepare"]>;
-  insertRangePackIndexByDimension: Map<string, ReturnType<Database["prepare"]>>;
 }
 
-export async function buildBinaryStore(options: BuildBinaryStoreOptions): Promise<void> {
+export async function buildBinaryStoreScheme2(options: BuildBinaryStoreSchema2Options): Promise<void> {
   await mkdir(options.outDir, { recursive: true });
 
   const metaPath = join(options.outDir, "meta.db");
@@ -68,16 +51,13 @@ export async function buildBinaryStore(options: BuildBinaryStoreOptions): Promis
   try {
     const dimensions = filterDimensions(discoverRangeDimensions(sourceDb), options.dimensions);
     const strategies = uniqueStrategies(dimensions);
-    initBinaryMetaDb(metaDb, dimensions);
+    initLightMetaDb(metaDb, dimensions);
     const statements = prepareBuildStatements(metaDb, dimensions);
     const schemaIdByKey = new Map<string, number>();
 
     metaDb.exec("BEGIN");
     try {
       copyDrillScenarioLines({ sourceDb, statements, strategies });
-      for (const dimension of dimensions) {
-        copyConcreteLines({ sourceDb, statements, dimension });
-      }
       metaDb.exec("COMMIT");
     } catch (error) {
       metaDb.exec("ROLLBACK");
@@ -110,7 +90,7 @@ export async function buildBinaryStore(options: BuildBinaryStoreOptions): Promis
 
 function filterDimensions(
   discovered: RangeDimension[],
-  requested: BuildBinaryStoreOptions["dimensions"],
+  requested: BuildBinaryStoreSchema2Options["dimensions"],
 ): RangeDimension[] {
   if (!requested || requested.length === 0) return discovered;
 
@@ -130,8 +110,6 @@ function uniqueStrategies(dimensions: RangeDimension[]): string[] {
 
 function prepareBuildStatements(metaDb: Database, dimensions: RangeDimension[]): BuildStatements {
   const insertDrillLineByStrategy = new Map<string, ReturnType<Database["prepare"]>>();
-  const insertConcreteLineByDimension = new Map<string, ReturnType<Database["prepare"]>>();
-  const insertRangePackIndexByDimension = new Map<string, ReturnType<Database["prepare"]>>();
 
   const strategies = uniqueStrategies(dimensions);
   for (const strategy of strategies) {
@@ -144,37 +122,14 @@ function prepareBuildStatements(metaDb: Database, dimensions: RangeDimension[]):
     );
   }
 
-  for (const dimension of dimensions) {
-    const key = dimensionKey(dimension);
-    const { strategy, playerCount, depthBb } = dimension;
-    insertConcreteLineByDimension.set(
-      key,
-      metaDb.prepare(`
-        INSERT OR IGNORE INTO ${quoteIdentifier(getConcreteLinesTableName(strategy, playerCount, depthBb))}(concrete_line_id, abstract_line, concrete_line)
-        VALUES (?, ?, ?)
-      `),
-    );
-    insertRangePackIndexByDimension.set(
-      key,
-      metaDb.prepare(`
-        INSERT OR REPLACE INTO ${quoteIdentifier(getRangePackIndexTableName(strategy, playerCount, depthBb))}(
-          concrete_line_id, action_schema_id, hand_count, offset, byte_length, checksum
-        )
-        VALUES (?, ?, ?, ?, ?, ?)
-      `),
-    );
-  }
-
   return {
     insertDrillLineByStrategy,
-    insertConcreteLineByDimension,
     selectActionSchema: metaDb.prepare("SELECT id FROM action_schemas WHERE schema_key = ?"),
     insertActionSchema: metaDb.prepare(`
       INSERT INTO action_schemas(action_count, action_blob, checksum, schema_key)
       VALUES (?, ?, ?, ?)
     `),
     lastInsertId: metaDb.prepare("SELECT last_insert_rowid() AS id"),
-    insertRangePackIndexByDimension,
   };
 }
 
@@ -212,28 +167,6 @@ function copyDrillScenarioLines(params: {
   }
 }
 
-function copyConcreteLines(params: {
-  sourceDb: Database;
-  statements: BuildStatements;
-  dimension: RangeDimension;
-}): void {
-  const key = dimensionKey(params.dimension);
-  const statement = params.statements.insertConcreteLineByDimension.get(key);
-  if (!statement) throw new Error(`Missing concrete insert statement for dimension ${key}`);
-
-  const rows = params.sourceDb
-    .query(`
-      SELECT id, abstract_line, concrete_line
-      FROM ${quoteIdentifier(params.dimension.concreteTable)}
-      ORDER BY id
-    `)
-    .iterate() as IterableIterator<{ id: number; abstract_line: string; concrete_line: string }>;
-
-  for (const row of rows) {
-    statement.run(row.id, row.abstract_line, row.concrete_line);
-  }
-}
-
 async function buildDimension(params: {
   sourceDb: Database;
   metaDb: Database;
@@ -246,7 +179,12 @@ async function buildDimension(params: {
   progressEveryPacks: number;
 }): Promise<void> {
   const binPath = join(params.outDir, params.dimension.binFile);
+  const idxPath = join(
+    params.outDir,
+    getIdxFileName(params.dimension.strategy, params.dimension.playerCount, params.dimension.depthBb),
+  );
   const writer = await RangeBinWriter.create(binPath, { overwrite: params.overwrite });
+  const idxWriter = await RangeIdxWriter.create(idxPath, { overwrite: params.overwrite });
   let currentConcreteLineId: number | null = null;
   let rowsForConcreteLine: OldRangeRow[] = [];
   let processedPacks = 0;
@@ -264,18 +202,14 @@ async function buildDimension(params: {
     });
     const appended = await writer.append(encoded.payload);
 
-    const key = dimensionKey(params.dimension);
-    const statement = params.statements.insertRangePackIndexByDimension.get(key);
-    if (!statement) throw new Error(`Missing range pack insert statement for dimension ${key}`);
-
-    statement.run(
+    await idxWriter.append({
       concreteLineId,
       actionSchemaId,
-      encoded.handCount,
-      appended.offset,
-      appended.byteLength,
-      appended.checksum,
-    );
+      handCount: encoded.handCount,
+      offset: appended.offset,
+      byteLength: appended.byteLength,
+      checksum: appended.checksum,
+    });
 
     processedPacks += 1;
     if (processedPacks % params.progressEveryPacks === 0) {
@@ -323,6 +257,7 @@ async function buildDimension(params: {
     throw error;
   } finally {
     await writer.close();
+    await idxWriter.close();
   }
 }
 
@@ -351,75 +286,4 @@ function getOrInsertActionSchema(params: {
   const inserted = params.statements.lastInsertId.get() as { id: number };
   params.schemaIdByKey.set(schemaKey, inserted.id);
   return inserted.id;
-}
-
-export function encodeConcreteLinePack(rows: OldRangeRow[]): EncodedConcreteLinePack {
-  if (rows.length === 0) throw new Error("Cannot encode empty concrete line range pack");
-
-  const actionByKey = new Map<string, Pick<ActionDef, "actionName" | "actionSize" | "amountBB">>();
-  const handIds = [...new Set(rows.map((row) => getHandId(row.hole_cards)))].sort((left, right) => left - right);
-
-  for (const row of rows) {
-    const actionName = normalizeActionName(row.action_name);
-    const actionSize = Number(row.action_size);
-    const amountBB = Number(row.amount_bb);
-    actionByKey.set(actionKey(actionName, actionSize, amountBB), { actionName, actionSize, amountBB });
-  }
-
-  const actions = [...actionByKey.values()].sort(compareActionDefs).map((action, actionId) => ({
-    actionId,
-    ...action,
-  }));
-  if (actions.length > 32) {
-    throw new Error(`V1 range pack supports up to 32 actions, got ${actions.length}`);
-  }
-
-  const actionIdByKey = new Map(actions.map((action) => [actionKey(action.actionName, action.actionSize, action.amountBB), action.actionId]));
-  const handIndexById = new Map(handIds.map((handId, handIndex) => [handId, handIndex]));
-  const actionMasks = new Array<number>(handIds.length).fill(0);
-  const values: RangeCellValue[][] = handIds.map(() =>
-    actions.map(() => ({
-      frequency: 0,
-      handEV: null,
-    })),
-  );
-
-  for (const row of rows) {
-    const handId = getHandId(row.hole_cards);
-    const handIndex = handIndexById.get(handId);
-    if (handIndex === undefined) throw new Error(`Internal hand index mismatch for ${row.hole_cards}`);
-
-    const normalizedActionName = normalizeActionName(row.action_name);
-    const actionId = actionIdByKey.get(actionKey(normalizedActionName, Number(row.action_size), Number(row.amount_bb)));
-    if (actionId === undefined) throw new Error(`Internal action index mismatch for ${row.action_name}`);
-
-    actionMasks[handIndex] = setMaskBit(actionMasks[handIndex], actionId);
-    values[handIndex][actionId] = {
-      frequency: Number(row.frequency),
-      handEV: row.hand_ev === null || row.hand_ev === undefined ? null : Number(row.hand_ev),
-    };
-  }
-
-  const actionBlob = encodeActionSchema(actions);
-  const payload = encodeRangePack({
-    handIds,
-    actionMasks,
-    values,
-    actionCount: actions.length,
-  });
-
-  return {
-    actionBlob,
-    actionCount: actions.length,
-    handCount: handIds.length,
-    payload,
-  };
-}
-
-function actionKey(actionName: string, actionSize: number, amountBB: number): string {
-  return `${actionName}\0${actionSize}\0${amountBB}`;
-}
-
-function toHex(bytes: Uint8Array): string {
-  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("hex");
 }

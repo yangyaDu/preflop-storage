@@ -1,21 +1,21 @@
 import { Database } from "bun:sqlite";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { decodeActionSchema, normalizeActionName, type ActionDef } from "../binary/action-schema-codec";
-import { assertCrc32c } from "../binary/crc32c";
-import { RangeBinReader } from "../binary/range-bin-reader";
-import { decodeRangePack, type DecodedRangePack } from "../binary/range-pack-codec";
-import { formatNumber, markdownTable } from "../analysis/format";
+import { decodeActionSchema, normalizeActionName, type ActionDef } from "../../binary/action-schema-codec";
+import { assertCrc32c } from "../../binary/crc32c";
+import { RangeBinReader } from "../../binary/range-bin-reader";
+import { decodeRangePack, type DecodedRangePack } from "../../binary/range-pack-codec";
+import { formatNumber, markdownTable } from "../../analysis/format";
 import {
   dimensionKey,
   getBinFileName,
   getRangePackIndexTableName,
   quoteIdentifier,
   type RangeDimension,
-} from "../db/naming";
-import { getHandId } from "../hand/hand-dict";
-import { discoverRangeDimensions, type OldRangeRow } from "../importer/old-sqlite";
-import { getNumberArg, getRepeatedStringArgs, getStringArg, parseCliArgs } from "./args";
+} from "../../db/naming";
+import { getHandId } from "../../hand/hand-dict";
+import { discoverRangeDimensions, type OldRangeRow } from "../../importer/old-sqlite";
+import { getNumberArg, getRepeatedStringArgs, getStringArg, parseCliArgs } from "../../cli/args";
 
 type VerifyMode = "sample" | "full";
 

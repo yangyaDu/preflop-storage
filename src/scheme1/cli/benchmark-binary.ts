@@ -1,3 +1,5 @@
+import { join } from "node:path";
+import { BinaryBenchmarkRunner, measureBinaryColdStart } from "../benchmark/binary-runner";
 import {
   buildTotals,
   createBenchmarkWorkload,
@@ -5,21 +7,26 @@ import {
   measureBenchmarkCase,
   parseRequestedDimension,
   type BenchmarkRunReport,
-} from "../benchmark/common";
-import { measureSqliteColdStart, SqliteBenchmarkRunner } from "../benchmark/sqlite-runner";
-import { getNumberArg, getRepeatedStringArgs, getStringArg, parseCliArgs } from "./args";
+  writeBenchmarkJson,
+  writeBenchmarkMarkdown,
+} from "../../benchmark/common";
+import { getBooleanArg, getNumberArg, getRepeatedStringArgs, getStringArg, parseCliArgs } from "../../cli/args";
 
 const args = parseCliArgs(Bun.argv.slice(2));
 
 const sourceDbPath = getStringArg(args, "source", "range-db/range.db");
-const outPath = getStringArg(args, "out", "reports/benchmark-sqlite.json");
-const mdPath = getStringArg(args, "md", "reports/benchmark-sqlite.md");
+const binaryDir = getStringArg(args, "dir", "range-db/binary");
+const metaDbPath = getStringArg(args, "meta", join(binaryDir, "meta.db"));
+const outPath = getStringArg(args, "out", "reports/benchmark-binary.json");
+const mdPath = getStringArg(args, "md", "reports/benchmark-binary.md");
 const seed = getNumberArg(args, "seed", 42);
 const defaultIterations = getNumberArg(args, "iterations", 1000);
 const handIterations = getNumberArg(args, "hand-iterations", defaultIterations);
 const batchIterations = getNumberArg(args, "batch-iterations", Math.min(defaultIterations, 200));
 const batchSize = getNumberArg(args, "batch-size", 20);
 const warmupIterations = getNumberArg(args, "warmup-iterations", 20);
+const packCacheSize = getNumberArg(args, "pack-cache-size", 1024);
+const verifyChecksums = getBooleanArg(args, "verify-checksum");
 const requestedDimensionValues = getRepeatedStringArgs(args, "dimension");
 const requestedDimensions = requestedDimensionValues.map(parseRequestedDimension);
 
@@ -32,22 +39,34 @@ const workload = createBenchmarkWorkload({
   batchSize,
 });
 
-const coldStart = measureSqliteColdStart(sourceDbPath, workload.handQueries[0]);
+const runnerOptions = {
+  verifyChecksums,
+  packCacheSize,
+};
+
+const coldStart = await measureBinaryColdStart({
+  metaDbPath,
+  binaryDir,
+  options: runnerOptions,
+  item: workload.handQueries[0],
+});
 const memoryBefore = getMemorySnapshot();
-const runner = new SqliteBenchmarkRunner(sourceDbPath);
+const runner = new BinaryBenchmarkRunner(metaDbPath, binaryDir, runnerOptions);
 
 try {
+  await runner.warmup(workload.dimensions);
+
   const cases = [
     await measureBenchmarkCase({
       name: "hand-strategy",
-      description: "Single concrete_line_id + hand query from old SQLite range rows.",
+      description: "Single concrete_line_id + hand query through PreflopQueryService.",
       items: workload.handQueries,
       warmupIterations,
       operation: (item) => runner.getHandStrategy(item),
     }),
     await measureBenchmarkCase({
       name: "batch-hand-strategy",
-      description: "Run a batch of concrete_line_id + hand lookups.",
+      description: "Run a batch of concrete_line_id + hand lookups through the SDK batch API.",
       items: workload.batchQueries,
       warmupIterations,
       operation: (item) => runner.getHandStrategiesBatch(item),
@@ -57,8 +76,10 @@ try {
   const memoryAfter = getMemorySnapshot();
   const report: BenchmarkRunReport = {
     generatedAt: new Date().toISOString(),
-    engine: "sqlite",
+    engine: "binary",
     sourceDbPath,
+    binaryDir,
+    metaDbPath,
     options: {
       seed,
       requestedDimensions: requestedDimensionValues,
@@ -66,6 +87,8 @@ try {
       batchIterations,
       batchSize,
       warmupIterations,
+      verifyChecksums,
+      packCacheSize,
     },
     workload: {
       dimensions: workload.dimensions,
@@ -83,26 +106,21 @@ try {
       deltaHeapUsedBytes: memoryAfter.heapUsedBytes - memoryBefore.heapUsedBytes,
     },
     notes: [
-      "Cold start includes opening the SQLite connection and running the first hand query, but it does not flush the operating-system file cache.",
-      "SQLite measurements use the old row-store tables and consume all returned rows so each query is materialized.",
-      "Drill random resolves drill_name/player/depth through drill_scenario_lines and concrete_lines before querying the selected hand.",
+      "Cold start includes opening meta.db/ranges file and running the first hand query, but it does not flush the operating-system file cache.",
+      "Hot measurements run after the service is opened; pack cache behavior is controlled by --pack-cache-size.",
+      "Result counts sum decoded action entries so work is consumed rather than only requested.",
     ],
   };
 
-  await writeReports(outPath, mdPath, report);
-} finally {
-  runner.close();
-}
-
-async function writeReports(outPath: string, mdPath: string, report: BenchmarkRunReport): Promise<void> {
-  const { writeBenchmarkJson, writeBenchmarkMarkdown } = await import("../benchmark/common");
   await writeBenchmarkJson(outPath, report);
   await writeBenchmarkMarkdown(mdPath, report);
 
-  console.log(`SQLite benchmark written: ${outPath}`);
-  console.log(`SQLite benchmark markdown written: ${mdPath}`);
+  console.log(`Binary benchmark written: ${outPath}`);
+  console.log(`Binary benchmark markdown written: ${mdPath}`);
 
   if (report.totals.errorCount > 0) {
     process.exitCode = 1;
   }
+} finally {
+  await runner.close();
 }

@@ -9,7 +9,7 @@
         "@types/bun": "latest",
         "eslint": "latest",
         "husky": "^9.1.7",
-        "typescript": "latest",
+        "typescript": "^6.0.3",
         "typescript-eslint": "latest",
       },
     },

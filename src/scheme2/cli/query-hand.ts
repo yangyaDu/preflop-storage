@@ -1,11 +1,11 @@
-import { PreflopQueryService } from "../query/preflop-query-service";
-import { getBooleanArg, getNumberArg, getStringArg, parseCliArgs } from "./args";
+import { Scheme2QueryService } from "../query/query-service";
+import { getBooleanArg, getNumberArg, getStringArg, parseCliArgs } from "../../cli/args";
 
 const args = parseCliArgs(Bun.argv.slice(2));
 
-const binaryDir = getStringArg(args, "dir", "range-db/binary");
+const binaryDir = getStringArg(args, "dir", "range-db/binary-scheme2");
 const metaPath = getStringArg(args, "meta", `${binaryDir}/meta.db`);
-const service = new PreflopQueryService(metaPath, binaryDir, {
+const service = new Scheme2QueryService(metaPath, binaryDir, {
   verifyChecksums: getBooleanArg(args, "verify-checksum"),
 });
 

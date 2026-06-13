@@ -2,9 +2,9 @@ import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { formatBytes, formatNumber, formatPercent, markdownTable, safeRatio } from "../analysis/format";
-import { quoteIdentifier, getBinFileName } from "../db/naming";
-import { parseCliArgs, getStringArg } from "./args";
+import { formatBytes, formatNumber, formatPercent, markdownTable, safeRatio } from "../../analysis/format";
+import { quoteIdentifier, getBinFileName } from "../../db/naming";
+import { parseCliArgs, getStringArg } from "../../cli/args";
 
 interface BinaryFileInfo {
   name: string;

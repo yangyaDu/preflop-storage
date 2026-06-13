@@ -1,10 +1,10 @@
-import { buildBinaryStore } from "../importer/build-binary-store";
-import { parseCliArgs, getBooleanArg, getNumberArg, getRepeatedStringArgs, getStringArg } from "./args";
+import { buildBinaryStoreScheme2 } from "../importer/build-binary-store";
+import { parseCliArgs, getBooleanArg, getNumberArg, getRepeatedStringArgs, getStringArg } from "../../cli/args";
 
 const args = parseCliArgs(Bun.argv.slice(2));
 
 const sourceDbPath = getStringArg(args, "source", "range-db/range.db");
-const outDir = getStringArg(args, "out", "range-db/binary");
+const outDir = getStringArg(args, "out", "range-db/binary-scheme2");
 const dimensions = getRepeatedStringArgs(args, "dimension").map(parseDimension);
 const maxConcreteLinesPerDimension = args["max-packs"] === undefined ? undefined : getNumberArg(args, "max-packs");
 
@@ -17,7 +17,7 @@ if (maxConcreteLinesPerDimension !== undefined) {
   console.log(`max-packs=${maxConcreteLinesPerDimension}`);
 }
 
-await buildBinaryStore({
+await buildBinaryStoreScheme2({
   sourceDbPath,
   outDir,
   overwrite: getBooleanArg(args, "overwrite"),
@@ -25,7 +25,7 @@ await buildBinaryStore({
   maxConcreteLinesPerDimension,
 });
 
-console.log("binary build completed");
+console.log("scheme2 binary build completed");
 
 function parseDimension(value: string): { strategy: string; playerCount: number; depthBb: number } {
   const tableLike = value.match(/^(.+)_([0-9]+)max_([0-9]+)BB$/);

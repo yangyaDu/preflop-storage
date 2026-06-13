@@ -175,29 +175,29 @@ export async function measureBenchmarkCase<T>(params: {
   const warmupIterations = params.items.length === 0 ? 0 : Math.min(params.warmupIterations, params.items.length);
 
   for (let index = 0; index < warmupIterations; index++) {
-    await params.operation(params.items[index], index);
+    const result = params.operation(params.items[index], index);
+    if (isPromise(result)) await result;
   }
 
-  const latencies: number[] = [];
   let resultCount = 0;
   let errorCount = 0;
   let firstError: string | null = null;
-  const caseStart = performance.now();
 
+  // 批量计时：整个循环只打两次 performance.now()，避免 per-iteration 开销污染数据
+  const caseStart = performance.now();
   for (let index = 0; index < params.items.length; index++) {
-    const itemStart = performance.now();
     try {
-      resultCount += await params.operation(params.items[index], index);
+      const result = params.operation(params.items[index], index);
+      resultCount += isPromise(result) ? await result : result;
     } catch (error) {
       errorCount += 1;
       firstError ??= error instanceof Error ? error.message : String(error);
-    } finally {
-      latencies.push(performance.now() - itemStart);
     }
   }
-
   const totalMs = performance.now() - caseStart;
-  const summary = summarizeLatencies(latencies);
+
+  // avgMs 和 QPS 基于批量计时
+  const avgMs = params.items.length > 0 ? totalMs / params.items.length : 0;
 
   return {
     name: params.name,
@@ -205,11 +205,11 @@ export async function measureBenchmarkCase<T>(params: {
     iterations: params.items.length,
     warmupIterations,
     totalMs,
-    avgMs: summary.avgMs,
-    p50Ms: summary.p50Ms,
-    p95Ms: summary.p95Ms,
-    p99Ms: summary.p99Ms,
-    maxMs: summary.maxMs,
+    avgMs,
+    p50Ms: 0,
+    p95Ms: 0,
+    p99Ms: 0,
+    maxMs: 0,
     qps: safeRatio(params.items.length, totalMs / 1000),
     resultCount,
     errorCount,
@@ -260,10 +260,10 @@ export function renderBenchmarkMarkdown(report: BenchmarkRunReport): string {
     item.name,
     formatNumber(item.iterations),
     formatMs(item.avgMs),
-    formatMs(item.p50Ms),
-    formatMs(item.p95Ms),
-    formatMs(item.p99Ms),
-    formatMs(item.maxMs),
+    item.p50Ms > 0 ? formatMs(item.p50Ms) : "N/A",
+    item.p95Ms > 0 ? formatMs(item.p95Ms) : "N/A",
+    item.p99Ms > 0 ? formatMs(item.p99Ms) : "N/A",
+    item.maxMs > 0 ? formatMs(item.maxMs) : "N/A",
     item.qps.toFixed(2),
     formatNumber(item.errorCount),
   ]);
@@ -516,40 +516,10 @@ function createSeededRandom(seed: number): SeededRandom {
   };
 }
 
-function summarizeLatencies(latencies: number[]): {
-  avgMs: number;
-  p50Ms: number;
-  p95Ms: number;
-  p99Ms: number;
-  maxMs: number;
-} {
-  if (latencies.length === 0) {
-    return {
-      avgMs: 0,
-      p50Ms: 0,
-      p95Ms: 0,
-      p99Ms: 0,
-      maxMs: 0,
-    };
-  }
-
-  const sorted = [...latencies].sort((left, right) => left - right);
-
-  return {
-    avgMs: safeRatio(sum(latencies), latencies.length),
-    p50Ms: percentile(sorted, 0.5),
-    p95Ms: percentile(sorted, 0.95),
-    p99Ms: percentile(sorted, 0.99),
-    maxMs: sorted[sorted.length - 1],
-  };
-}
-
-function percentile(sortedValues: number[], percentileValue: number): number {
-  if (sortedValues.length === 0) return 0;
-  const index = Math.min(sortedValues.length - 1, Math.max(0, Math.ceil(sortedValues.length * percentileValue) - 1));
-  return sortedValues[index];
-}
-
 function sum(values: number[]): number {
   return values.reduce((total, value) => total + value, 0);
+}
+
+function isPromise(value: unknown): value is Promise<unknown> {
+  return typeof value === "object" && value !== null && typeof (value as Promise<unknown>).then === "function";
 }

@@ -2,9 +2,9 @@ import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { mkdir, stat } from "node:fs/promises";
 import { dirname } from "node:path";
-import { formatBytes, formatNumber, markdownTable, safeRatio } from "../analysis/format";
-import { parseCliArgs, getStringArg } from "./args";
-import { parseRangeDataTableName, quoteIdentifier } from "../db/naming";
+import { formatBytes, formatNumber, markdownTable, safeRatio } from "../../analysis/format";
+import { parseCliArgs, getStringArg } from "../../cli/args";
+import { parseRangeDataTableName, quoteIdentifier } from "../../db/naming";
 
 interface FileSizeInfo {
   path: string;

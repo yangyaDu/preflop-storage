@@ -1,6 +1,6 @@
 # 二进制 Benchmark 报告
 
-生成时间：2026-06-13T06:53:43.627Z
+生成时间：2026-06-13T05:19:22.401Z
 
 ## 总览
 
@@ -8,21 +8,21 @@
 - 源 SQLite：`range-db/range.db`
 - 二进制目录：`range-db/binary`
 - meta.db：`range-db\binary\meta.db`
-- 维度：default:6max:100BB, default:6max:200BB, default:6max:300BB, default:8max:100BB, default:8max:200BB, default:8max:300BB, default:9max:100BB, default:9max:200BB, default:9max:300BB
+- 维度：default:6max:100BB, default:6max:200BB, default:6max:300BB, default:8max:100BB, default:8max:200BB, default:8max:300BB
 - workload seed：42
-- 总迭代：300
-- 总耗时：494.99 ms
-- 综合 QPS：606.08
+- 总迭代：700
+- 总耗时：476.19 ms
+- 综合 QPS：1470.01
 - 错误数：0
-- 返回 action 总数：7,422
-- RSS 变化：230.79 MB
-- heap used 变化：149.79 MB
-- 冷启动首查：359.52 ms，返回 action 数：3
+- 返回 action 总数：14,686
+- RSS 变化：62.01 MB
+- heap used 变化：21.95 MB
+- 冷启动首查：20.94 ms，返回 action 数：4
 
 ## Workload
 
-- 单手牌查询：200
-- 批量查询：100
+- 单手牌查询：500
+- 批量查询：200
 - batch size：20
 - warmup iterations：20
 
@@ -30,15 +30,15 @@
 
 | case | iters | avg | p50 | p95 | p99 | max | qps | errors |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| hand-strategy | 200 | 0.346 ms | N/A | N/A | N/A | N/A | 2891.40 | 0 |
-| batch-hand-strategy | 100 | 4.258 ms | N/A | N/A | N/A | N/A | 234.84 | 0 |
+| hand-strategy | 500 | 0.271 ms | 0.295 ms | 0.687 ms | 0.853 ms | 0.961 ms | 3690.08 | 0 |
+| batch-hand-strategy | 200 | 1.702 ms | 1.721 ms | 3.570 ms | 4.034 ms | 4.857 ms | 587.04 | 0 |
 
 ## 内存
 
-- before RSS：357.48 MB
-- after RSS：588.27 MB
-- before heap used：139.68 MB
-- after heap used：289.48 MB
+- before RSS：182.91 MB
+- after RSS：244.92 MB
+- before heap used：3.13 MB
+- after heap used：25.08 MB
 
 ## 说明
 

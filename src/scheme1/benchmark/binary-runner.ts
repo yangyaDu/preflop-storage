@@ -1,11 +1,11 @@
-import { getBinFileName } from "../db/naming";
+import { getBinFileName } from "../../db/naming";
 import { PreflopQueryService } from "../query/preflop-query-service";
 import {
   type BatchBenchmarkItem,
   type ColdStartResult,
   getMemorySnapshot,
   type HandBenchmarkItem,
-} from "./common";
+} from "../../benchmark/common";
 
 export interface BinaryBenchmarkRunnerOptions {
   verifyChecksums: boolean;

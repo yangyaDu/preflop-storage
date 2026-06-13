@@ -6,7 +6,7 @@ import {
   getRangePackIndexTableName,
   getDrillScenarioTableName,
   quoteIdentifier,
-} from "./naming";
+} from "../../db/naming";
 
 export interface ConcreteLineRow {
   concrete_line_id: number;

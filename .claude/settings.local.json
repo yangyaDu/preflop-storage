@@ -6,7 +6,12 @@
       "Bash(bun run typecheck)",
       "Bash(bun run benchmark:compare)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(bun run check)",
+      "Bash(bun run:*)",
+      "Bash(node:*)",
+      "Bash(bun -e:*)",
+      "Bash(bun x:*)"
     ]
   }
 }

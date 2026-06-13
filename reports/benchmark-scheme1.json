@@ -1,0 +1,120 @@
+{
+  "generatedAt": "2026-06-13T05:19:22.401Z",
+  "engine": "binary",
+  "sourceDbPath": "range-db/range.db",
+  "binaryDir": "range-db/binary",
+  "metaDbPath": "range-db\\binary\\meta.db",
+  "options": {
+    "seed": 42,
+    "requestedDimensions": [
+      "default:6:100",
+      "default:6:200",
+      "default:6:300",
+      "default:8:100",
+      "default:8:200",
+      "default:8:300"
+    ],
+    "handIterations": 500,
+    "batchIterations": 200,
+    "batchSize": 20,
+    "warmupIterations": 20,
+    "verifyChecksums": false,
+    "packCacheSize": 1024
+  },
+  "workload": {
+    "dimensions": [
+      "default:6max:100BB",
+      "default:6max:200BB",
+      "default:6max:300BB",
+      "default:8max:100BB",
+      "default:8max:200BB",
+      "default:8max:300BB"
+    ],
+    "handQueries": 500,
+    "batchQueries": 200,
+    "batchSize": 20
+  },
+  "coldStart": {
+    "operation": "open meta.db/ranges file and run first hand query",
+    "totalMs": 20.936800000000005,
+    "resultCount": 4,
+    "memoryBefore": {
+      "rssBytes": 162574336,
+      "heapTotalBytes": 2729984,
+      "heapUsedBytes": 644493,
+      "externalBytes": 169101,
+      "arrayBuffersBytes": 0
+    },
+    "memoryAfter": {
+      "rssBytes": 191795200,
+      "heapTotalBytes": 3059712,
+      "heapUsedBytes": 3285606,
+      "externalBytes": 5039532,
+      "arrayBuffersBytes": 4635754
+    }
+  },
+  "cases": [
+    {
+      "name": "hand-strategy",
+      "description": "Single concrete_line_id + hand query through PreflopQueryService.",
+      "iterations": 500,
+      "warmupIterations": 20,
+      "totalMs": 135.49849999999992,
+      "avgMs": 0.2705501999999985,
+      "p50Ms": 0.294900000000041,
+      "p95Ms": 0.6872000000000185,
+      "p99Ms": 0.8526999999999703,
+      "maxMs": 0.9612999999999943,
+      "qps": 3690.077749938194,
+      "resultCount": 1656,
+      "errorCount": 0,
+      "firstError": null
+    },
+    {
+      "name": "batch-hand-strategy",
+      "description": "Run a batch of concrete_line_id + hand lookups through the SDK batch API.",
+      "iterations": 200,
+      "warmupIterations": 20,
+      "totalMs": 340.69010000000003,
+      "avgMs": 1.702436,
+      "p50Ms": 1.7205999999999904,
+      "p95Ms": 3.57000000000005,
+      "p99Ms": 4.03449999999998,
+      "maxMs": 4.856800000000021,
+      "qps": 587.0437679286835,
+      "resultCount": 13030,
+      "errorCount": 0,
+      "firstError": null
+    }
+  ],
+  "totals": {
+    "iterations": 700,
+    "totalMs": 476.18859999999995,
+    "avgQps": 1470.00579182282,
+    "errorCount": 0,
+    "resultCount": 14686
+  },
+  "memory": {
+    "before": {
+      "rssBytes": 191795200,
+      "heapTotalBytes": 3059712,
+      "heapUsedBytes": 3285606,
+      "externalBytes": 5039532,
+      "arrayBuffersBytes": 4635754
+    },
+    "after": {
+      "rssBytes": 256815104,
+      "heapTotalBytes": 20929536,
+      "heapUsedBytes": 26303232,
+      "externalBytes": 21438089,
+      "arrayBuffersBytes": 21002408
+    },
+    "deltaRssBytes": 65019904,
+    "deltaHeapUsedBytes": 23017626
+  },
+  "notes": [
+    "Cold start includes opening meta.db/ranges file and running the first hand query, but it does not flush the operating-system file cache.",
+    "Hot measurements run after the service is opened; pack cache behavior is controlled by --pack-cache-size.",
+    "Result counts sum decoded action entries so work is consumed rather than only requested."
+  ]
+}
