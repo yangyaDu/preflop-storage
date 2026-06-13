@@ -11,7 +11,22 @@
       "Bash(bun run:*)",
       "Bash(node:*)",
       "Bash(bun -e:*)",
-      "Bash(bun x:*)"
+      "Bash(bun x:*)",
+      "WebSearch",
+      "Bash(rustup:*)",
+      "WebFetch(domain:crates.io)",
+      "Bash(export:*)",
+      "Bash(cargo test:*)",
+      "Bash(npx napi build:*)",
+      "Bash(cmd.exe:*)",
+      "Bash(tr:*)",
+      "Bash(# Search for dlltool in all common locations find /usr -name \"\"dlltool*\"\" find /mingw64 -name \"\"dlltool*\"\" find /c/msys64 -name \"\"dlltool*\"\" # Check if dlltool package is installed in the MSYS2 ls /var/lib/pacman/local/)",
+      "Bash(\"$HOME/.cargo/bin/dlltool.exe\":*)",
+      "Bash(echo:*)",
+      "Bash(__NEW_LINE_344570924aa25c6c__ cd /c/Users/Duyang/Desktop/elysia_project/preflop-storage/native-addon)",
+      "Bash(cargo build:*)",
+      "Bash(# Check if VS 2022 build tools are accessible export PATH=\"\"$HOME/.cargo/bin:$PATH\"\" # Look for cl.exe and vcvars find \"\"C:/Program Files/Microsoft Visual Studio/2022\"\" -name \"\"cl.exe\"\")",
+      "Bash(npx eslint:*)"
     ]
   }
 }

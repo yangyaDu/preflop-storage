@@ -1,0 +1,23 @@
+[package]
+name = "preflop-storage-native"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "3", features = ["napi4"] }
+napi-derive = "3"
+memmap2 = "0.9"
+
+[dev-dependencies]
+tempfile = "3"
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "symbols"

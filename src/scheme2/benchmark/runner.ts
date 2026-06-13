@@ -23,18 +23,16 @@ export class Scheme2BenchmarkRunner {
     });
   }
 
-  async warmup(dimensions: string[]): Promise<void> {
-    const tasks = dimensions.map((key) => {
+  warmup(dimensions: string[]): void {
+    for (const key of dimensions) {
       const parts = key.split(":");
-      if (parts.length !== 3) return Promise.resolve();
+      if (parts.length !== 3) continue;
       const strategy = parts[0];
       const playerCount = Number(parts[1].replace("max", ""));
       const depthBb = Number(parts[2].replace("BB", ""));
 
-      return this.service.prewarmDimension({ strategy, playerCount, depthBb });
-    });
-
-    await Promise.all(tasks);
+      this.service.prewarmDimension({ strategy, playerCount, depthBb });
+    }
   }
 
   getHandStrategy(item: HandBenchmarkItem): number {

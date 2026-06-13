@@ -39,6 +39,13 @@ temp/
 *.tmp
 *.bak
 
+# Native addon (Rust/napi-rs) build artifacts
+native-addon/target/
+native-addon/*.node
+
+# Claude local settings
+.claude/
+
 # Editor and OS files
 .idea/
 .vscode/

@@ -1,6 +1,6 @@
 # 二进制 Benchmark 报告
 
-生成时间：2026-06-13T06:49:42.631Z
+生成时间：2026-06-13T12:30:12.254Z
 
 ## 总览
 
@@ -10,19 +10,19 @@
 - meta.db：`range-db\binary-scheme2\meta.db`
 - 维度：default:6max:100BB, default:6max:200BB, default:6max:300BB, default:8max:100BB, default:8max:200BB, default:8max:300BB, default:9max:100BB, default:9max:200BB, default:9max:300BB
 - workload seed：42
-- 总迭代：300
-- 总耗时：467.93 ms
-- 综合 QPS：641.12
+- 总迭代：15
+- 总耗时：1.692 ms
+- 综合 QPS：8866.30
 - 错误数：0
-- 返回 action 总数：5,973
-- RSS 变化：52.34 MB
-- heap used 变化：23.10 MB
-- 冷启动首查：17.39 ms，返回 action 数：3
+- 返回 action 总数：370
+- RSS 变化：4.14 MB
+- heap used 变化：0 B
+- 冷启动首查：27.12 ms，返回 action 数：3
 
 ## Workload
 
-- 单手牌查询：200
-- 批量查询：100
+- 单手牌查询：10
+- 批量查询：5
 - batch size：20
 - warmup iterations：20
 
@@ -30,15 +30,15 @@
 
 | case | iters | avg | p50 | p95 | p99 | max | qps | errors |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| hand-strategy | 200 | 0.333 ms | N/A | N/A | N/A | N/A | 3001.27 | 0 |
-| batch-hand-strategy | 100 | 4.013 ms | N/A | N/A | N/A | N/A | 249.20 | 0 |
+| hand-strategy | 10 | 0.020 ms | N/A | N/A | N/A | N/A | 49261.08 | 0 |
+| batch-hand-strategy | 5 | 0.298 ms | N/A | N/A | N/A | N/A | 3358.41 | 0 |
 
 ## 内存
 
-- before RSS：185.36 MB
-- after RSS：237.71 MB
-- before heap used：5.85 MB
-- after heap used：28.95 MB
+- before RSS：119.74 MB
+- after RSS：123.88 MB
+- before heap used：626.35 KB
+- after heap used：626.35 KB
 
 ## 说明
 
