@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { decodeActionSchema, encodeActionSchema } from "../src/binary/action-schema-codec";
 import { crc32c } from "../src/binary/crc32c";
 import { assertSupportedHeader, decodeFileHeader, encodeFileHeader } from "../src/binary/file-header";
-import { decodeRangePack, encodeRangePack, setMaskBit } from "../src/binary/range-pack-codec";
+import { decodeRangePack, decodeRangePackForHand, decodeRangePackMaskMatch, encodeRangePack, setMaskBit } from "../src/binary/range-pack-codec";
 import { encodeConcreteLinePack } from "../src/importer/build-binary-store";
 
 describe("binary codecs", () => {
@@ -84,5 +84,130 @@ describe("binary codecs", () => {
     expect(actions.map((action) => action.actionName)).toEqual(["fold", "raise"]);
     expect(pack.handIds).toEqual([0]);
     expect(pack.cells[1]).toMatchObject({ exists: true, frequency: expect.closeTo(0.9, 5), handEV: expect.closeTo(1.25, 5) });
+  });
+
+  test("decodeRangePackForHand decodes only the target hand", () => {
+    const encoded = encodeRangePack({
+      handIds: [0, 100, 168],
+      actionMasks: [
+        setMaskBit(0, 0) | setMaskBit(0, 1),
+        setMaskBit(0, 0),
+        setMaskBit(0, 1),
+      ],
+      actionCount: 2,
+      values: [
+        [{ frequency: 0.5, handEV: 1.0 }, { frequency: 0.3, handEV: -0.5 }],
+        [{ frequency: 0.8, handEV: null }, { frequency: 0, handEV: null }],
+        [{ frequency: 0, handEV: null }, { frequency: 0.25, handEV: 2.0 }],
+      ],
+    });
+
+    const cells = decodeRangePackForHand({
+      bytes: encoded,
+      handCount: 3,
+      actionCount: 2,
+      targetHandId: 100,
+    });
+
+    expect(cells).toHaveLength(2);
+    expect(cells[0]).toMatchObject({ handId: 100, actionId: 0, exists: true, handEV: null });
+    expect(cells[0].frequency).toBeCloseTo(0.8, 5);
+    expect(cells[1]).toMatchObject({ handId: 100, actionId: 1, exists: false, handEV: null });
+  });
+
+  test("decodeRangePackForHand returns empty for missing hand", () => {
+    const encoded = encodeRangePack({
+      handIds: [0, 100],
+      actionMasks: [0, 0],
+      actionCount: 1,
+      values: [
+        [{ frequency: 1, handEV: 0 }],
+        [{ frequency: 0.5, handEV: 0 }],
+      ],
+    });
+
+    const cells = decodeRangePackForHand({
+      bytes: encoded,
+      handCount: 2,
+      actionCount: 1,
+      targetHandId: 168,
+    });
+
+    expect(cells).toHaveLength(0);
+  });
+
+  test("decodeRangePackMaskMatch returns all hands when targetActionIds is empty", () => {
+    const encoded = encodeRangePack({
+      handIds: [0, 50, 100, 168],
+      actionMasks: [0, 0, 0, 0],
+      actionCount: 2,
+      values: [
+        [{ frequency: 0, handEV: null }, { frequency: 0, handEV: null }],
+        [{ frequency: 0, handEV: null }, { frequency: 0, handEV: null }],
+        [{ frequency: 0, handEV: null }, { frequency: 0, handEV: null }],
+        [{ frequency: 0, handEV: null }, { frequency: 0, handEV: null }],
+      ],
+    });
+
+    const result = decodeRangePackMaskMatch({
+      bytes: encoded,
+      handCount: 4,
+      actionCount: 2,
+      targetActionIds: [],
+    });
+
+    expect(result).toEqual([0, 50, 100, 168]);
+  });
+
+  test("decodeRangePackMaskMatch filters by single action mask", () => {
+    const encoded = encodeRangePack({
+      handIds: [0, 50, 100],
+      actionMasks: [
+        setMaskBit(0, 0),           // has action 0
+        setMaskBit(0, 0) | setMaskBit(0, 1), // has actions 0 and 1
+        setMaskBit(0, 1),           // has action 1
+      ],
+      actionCount: 2,
+      values: [
+        [{ frequency: 1, handEV: 0 }, { frequency: 0, handEV: null }],
+        [{ frequency: 1, handEV: 0 }, { frequency: 0, handEV: null }],
+        [{ frequency: 0, handEV: null }, { frequency: 1, handEV: 0 }],
+      ],
+    });
+
+    const result = decodeRangePackMaskMatch({
+      bytes: encoded,
+      handCount: 3,
+      actionCount: 2,
+      targetActionIds: [0],
+    });
+
+    expect(result).toEqual([0, 50]);
+  });
+
+  test("decodeRangePackMaskMatch filters by multiple action masks", () => {
+    const encoded = encodeRangePack({
+      handIds: [0, 50, 100],
+      actionMasks: [
+        setMaskBit(0, 0),
+        setMaskBit(0, 0) | setMaskBit(0, 1),
+        setMaskBit(0, 1),
+      ],
+      actionCount: 2,
+      values: [
+        [{ frequency: 1, handEV: 0 }, { frequency: 0, handEV: null }],
+        [{ frequency: 1, handEV: 0 }, { frequency: 0, handEV: null }],
+        [{ frequency: 0, handEV: null }, { frequency: 1, handEV: 0 }],
+      ],
+    });
+
+    const result = decodeRangePackMaskMatch({
+      bytes: encoded,
+      handCount: 3,
+      actionCount: 2,
+      targetActionIds: [0, 1],
+    });
+
+    expect(result).toEqual([50]);
   });
 });

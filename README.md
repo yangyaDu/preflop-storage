@@ -275,19 +275,7 @@ const strategy = await service.getHandStrategy({
 await service.close();
 ```
 
-严格错误码接口：
-
-```ts
-const strategy = await service.getHandStrategyOrThrow({
-  strategy: "default",
-  playerCount: 6,
-  depthBb: 100,
-  concreteLineId: 1,
-  holeCards: "22",
-});
-```
-
-批量查询：
+批量查询（自动分组 + 并行读取 + 按需解码）：
 
 ```ts
 const batch = await service.getHandStrategiesBatch({
@@ -301,25 +289,12 @@ const batch = await service.getHandStrategiesBatch({
 });
 ```
 
-场景级查询：
-
-```ts
-const scenarioStrategies = await service.getScenarioHandStrategies({
-  strategy: "default",
-  drillName: "BTN vs BB",
-  playerCount: 6,
-  drillDepth: 0,
-  depthBb: 100,
-  holeCards: "AKs",
-});
-```
-
 更完整的 SDK 说明见 `docs/query-sdk.md`。
 
-也可以查询完整 range：
+查询 pack 中所有手牌：
 
 ```ts
-const fullRange = await service.getFullRange({
+const allHands = await service.getHandsByAction({
   strategy: "default",
   playerCount: 6,
   depthBb: 100,
@@ -335,8 +310,20 @@ const raiseHands = await service.getHandsByAction({
   playerCount: 6,
   depthBb: 100,
   concreteLineId: 1,
-  actionName: "raise",
+  actionNames: ["raise"],
   minFrequency: 0.1,
+});
+```
+
+按多个 action 同时筛选：
+
+```ts
+const raiseAndCallHands = await service.getHandsByAction({
+  strategy: "default",
+  playerCount: 6,
+  depthBb: 100,
+  concreteLineId: 1,
+  actionNames: ["raise", "call"],
 });
 ```
 

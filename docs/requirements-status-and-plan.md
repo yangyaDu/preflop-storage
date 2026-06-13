@@ -157,23 +157,30 @@ src/cli/build-binary.ts
 
 已完成：
 
-- `PreflopQueryService`。
+- `PreflopQueryService`（5 个 API）。
 - 单手牌查询：
 
 ```ts
 getHandStrategy()
 ```
 
-- 单行动线完整 range 查询：
-
-```ts
-getFullRange()
-```
-
-- 按 action 筛选手牌：
+- 按 action 筛选手牌 / 完整 range（合并后）：
 
 ```ts
 getHandsByAction()
+```
+
+- 批量查询（分组 + 并行 + 按需解码）：
+
+```ts
+getHandStrategiesBatch()
+```
+
+- 场景元数据查询：
+
+```ts
+getDrillScenarioLines()
+getConcreteLines()
 ```
 
 - 查询 CLI：
@@ -582,9 +589,9 @@ docs/query-sdk.md
 当前最新进度：
 
 - 已新增 `src/query/errors.ts`，提供 `PreflopQueryError` 和稳定错误码。
-- 已新增 `getHandStrategyOrThrow()`，用于需要业务错误码的单手牌查询。
+- 已新增内部使用 MetaDb prepared statement + 按需解码（`decodeRangePackForHand`），消除全量 1690 cell 分配开销。
 - 已新增 `getHandStrategiesBatch()`，批量查询返回逐项 `strategy/error` 稳定结构。
-- 已新增 `getScenarioConcreteLines()` 和 `getScenarioHandStrategies()`，封装 `drill_name -> abstract_line -> concrete_line -> strategy` 查询链路。
+- `drill_name -> abstract_line -> concrete_line -> strategy` 查询链路由消费者通过 `getDrillScenarioLines()` + `getConcreteLines()` + `getHandStrategy()` 自行组合。
 - 已新增可选 `packCacheSize`，支持解码后 range pack 的简单 LRU 缓存；原有 action schema cache 保留。
 - 已新增 `docs/query-sdk.md`。
 - 待补充：基于真实业务高频路径验证场景级参数命名和返回结构是否完全满足接入侧。
@@ -841,12 +848,12 @@ reports/benchmark-report.md
 当前已生成的全维度样本报告使用：
 
 ```powershell
-bun run benchmark:sqlite --iterations 200 --full-range-iterations 50 --drill-iterations 30 --batch-iterations 50 --batch-size 20 --warmup-iterations 10
-bun run benchmark:binary --iterations 200 --full-range-iterations 50 --drill-iterations 30 --batch-iterations 50 --batch-size 20 --warmup-iterations 10 --pack-cache-size 4096
+bun run benchmark:sqlite --iterations 200 --batch-iterations 50 --batch-size 20 --warmup-iterations 10
+bun run benchmark:binary --iterations 200 --batch-iterations 50 --batch-size 20 --warmup-iterations 10 --pack-cache-size 4096
 bun run benchmark:compare
 ```
 
-当前样本摘要：
+当前样本摘要（历史数据，截至 API 精简前）：
 
 ```text
 维度：default 6max/8max/9max，100BB/200BB/300BB
@@ -855,8 +862,6 @@ SQLite 错误数：0
 SQLite 冷启动首查：15.53 ms
 二进制冷启动首查：27.85 ms
 hand-strategy P95：SQLite 0.148 ms，二进制 3.147 ms
-full-range P95：SQLite 1.367 ms，二进制 2.363 ms
-drill-random P95：SQLite 65.75 ms，二进制 1.57 s
 batch-hand-strategy P95：SQLite 1.736 ms，二进制 28.26 ms
 ```
 

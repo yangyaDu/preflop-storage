@@ -267,11 +267,11 @@ bun run src/cli/query-hand.ts --dir range-db/binary-missing-bin --meta range-db/
 - 命令失败。
 - 错误与缺失的 `.bin` 文件路径有关。
 
-## 用例 11：完整 range 查询
+## 用例 11：pack 中所有手牌查询
 
 测试目标：
 
-验证 `PreflopQueryService.getFullRange()` 可以一次性展开某条 concrete line 的所有手牌策略。
+验证 `PreflopQueryService.getHandsByAction()` 不传 `actionNames` 时可以返回 pack 中所有手牌。
 
 示例代码：
 
@@ -280,7 +280,7 @@ import { PreflopQueryService } from "../src/query/preflop-query-service";
 
 const service = new PreflopQueryService("range-db/binary-smoke/meta.db", "range-db/binary-smoke");
 
-const result = await service.getFullRange({
+const result = await service.getHandsByAction({
   strategy: "default",
   playerCount: 6,
   depthBb: 100,
@@ -293,9 +293,8 @@ await service.close();
 
 预期结果：
 
-- 返回数组。
+- 返回 `string[]`（holeCards 数组）。
 - 数组长度大于 0。
-- 每一项包含 `holeCards`、`exists`、`actions`。
 
 ## 用例 12：按 action 筛选手牌
 
@@ -311,16 +310,15 @@ const raiseHands = await service.getHandsByAction({
   playerCount: 6,
   depthBb: 100,
   concreteLineId: 1,
-  actionName: "raise",
+  actionNames: ["raise"],
   minFrequency: 0.1,
 });
 ```
 
 预期结果：
 
-- 返回数组。
-- 每一项包含 `holeCards`、`frequency`、`handEV`、`actionSize`、`amountBB`。
-- 每一项的 `frequency` 都大于 `0.1`。
+- 返回 `string[]`（holeCards 数组）。
+- 所有返回手牌的 raise 频率都大于 `0.1`。
 
 ## 用例 13：Float32 精度差异
 

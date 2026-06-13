@@ -26,7 +26,7 @@ await service.close();
 
 ## 单手牌查询
 
-兼容旧接口，找不到 pack 时返回 `null`：
+使用 `getHandStrategy`，找不到 pack 时返回 `null`：
 
 ```ts
 const result = await service.getHandStrategy({
@@ -38,19 +38,11 @@ const result = await service.getHandStrategy({
 });
 ```
 
-如果业务希望使用错误码，使用严格接口：
-
-```ts
-const result = await service.getHandStrategyOrThrow({
-  strategy: "default",
-  playerCount: 6,
-  depthBb: 100,
-  concreteLineId: 1,
-  holeCards: "AA",
-});
-```
+内部使用 MetaDb prepared statement + 按需解码，只解析目标手牌的 cell 数据。
 
 ## 批量查询
+
+自动按 concreteLineId 分组，同一 pack 只读一次，不同 pack 并行读取：
 
 ```ts
 const results = await service.getHandStrategiesBatch({
@@ -82,30 +74,67 @@ const results = await service.getHandStrategiesBatch({
 
 如果某项失败，`strategy` 为 `null`，`error` 包含业务错误码。
 
-## 场景级查询
+## 按 action 筛选手牌
 
-先通过 `drill_name + player_count + drill_depth` 找到抽象行动线，再通过 `abstract_line + depthBb` 找到具体行动线，最后返回每条 concrete line 的手牌策略：
+`getHandsByAction` 支持多种查询模式：
 
 ```ts
-const results = await service.getScenarioHandStrategies({
+// 查询 pack 中所有手牌
+const allHands = await service.getHandsByAction({
   strategy: "default",
-  drillName: "BTN vs BB",
   playerCount: 6,
-  drillDepth: 0,
   depthBb: 100,
-  holeCards: "AKs",
+  concreteLineId: 1,
+});
+
+// 按单个 action 筛选
+const raiseHands = await service.getHandsByAction({
+  strategy: "default",
+  playerCount: 6,
+  depthBb: 100,
+  concreteLineId: 1,
+  actionNames: ["raise"],
+});
+
+// 按多个 action 同时筛选（必须有 raise 且有 call 的手牌）
+const raiseAndCallHands = await service.getHandsByAction({
+  strategy: "default",
+  playerCount: 6,
+  depthBb: 100,
+  concreteLineId: 1,
+  actionNames: ["raise", "call"],
+});
+
+// 带频率阈值筛选
+const strongRaises = await service.getHandsByAction({
+  strategy: "default",
+  playerCount: 6,
+  depthBb: 100,
+  concreteLineId: 1,
+  actionNames: ["raise"],
+  minFrequency: 0.1,
 });
 ```
 
-也可以只解析场景下的具体行动线：
+返回 `string[]`（holeCards 数组）。
+
+## 场景元数据查询
 
 ```ts
-const lines = service.getScenarioConcreteLines({
+// 查询 drill 场景下的抽象行动线
+const lines = service.getDrillScenarioLines({
   strategy: "default",
   drillName: "BTN vs BB",
   playerCount: 6,
   drillDepth: 0,
+});
+
+// 查询某条抽象行动线下的具体行动线
+const concreteLines = service.getConcreteLines({
+  strategy: "default",
+  playerCount: 6,
   depthBb: 100,
+  abstractLine: "some line",
 });
 ```
 
@@ -126,7 +155,7 @@ const lines = service.getScenarioConcreteLines({
 import { PreflopQueryError } from "../src/query/errors";
 
 try {
-  await service.getHandStrategyOrThrow({
+  await service.getHandStrategy({
     playerCount: 6,
     depthBb: 100,
     concreteLineId: 1,

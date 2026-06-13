@@ -119,8 +119,6 @@ function isWorkloadCompatible(sqliteReport: BenchmarkRunReport, binaryReport: Be
   return (
     sqliteReport.options.seed === binaryReport.options.seed &&
     sqliteReport.workload.handQueries === binaryReport.workload.handQueries &&
-    sqliteReport.workload.fullRangeQueries === binaryReport.workload.fullRangeQueries &&
-    sqliteReport.workload.drillQueries === binaryReport.workload.drillQueries &&
     sqliteReport.workload.batchQueries === binaryReport.workload.batchQueries &&
     sqliteReport.workload.batchSize === binaryReport.workload.batchSize &&
     sqliteReport.workload.dimensions.join("\0") === binaryReport.workload.dimensions.join("\0")

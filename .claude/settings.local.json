@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bun run lint)",
+      "Bash(bun test)",
+      "Bash(bun run typecheck)",
+      "Bash(bun run benchmark:compare)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ]
+  }
+}

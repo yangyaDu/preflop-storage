@@ -19,22 +19,6 @@ export interface HandBenchmarkItem {
   holeCards: string;
 }
 
-export interface FullRangeBenchmarkItem {
-  strategy: string;
-  playerCount: number;
-  depthBb: number;
-  concreteLineId: number;
-}
-
-export interface DrillBenchmarkItem {
-  strategy: string;
-  drillName: string;
-  playerCount: number;
-  drillDepth: number;
-  depthBb: number;
-  holeCards: string;
-}
-
 export interface BatchBenchmarkItem {
   strategy: string;
   playerCount: number;
@@ -49,8 +33,6 @@ export interface BenchmarkWorkload {
   seed: number;
   dimensions: string[];
   handQueries: HandBenchmarkItem[];
-  fullRangeQueries: FullRangeBenchmarkItem[];
-  drillQueries: DrillBenchmarkItem[];
   batchQueries: BatchBenchmarkItem[];
   batchSize: number;
 }
@@ -60,8 +42,6 @@ export interface WorkloadOptions {
   requestedDimensions: RequestedDimension[];
   seed: number;
   handIterations: number;
-  fullRangeIterations: number;
-  drillIterations: number;
   batchIterations: number;
   batchSize: number;
 }
@@ -109,8 +89,6 @@ export interface BenchmarkRunReport {
     seed: number;
     requestedDimensions: string[];
     handIterations: number;
-    fullRangeIterations: number;
-    drillIterations: number;
     batchIterations: number;
     batchSize: number;
     warmupIterations: number;
@@ -120,8 +98,6 @@ export interface BenchmarkRunReport {
   workload: {
     dimensions: string[];
     handQueries: number;
-    fullRangeQueries: number;
-    drillQueries: number;
     batchQueries: number;
     batchSize: number;
   };
@@ -160,12 +136,6 @@ interface SampledRangeRow {
   hole_cards: string;
 }
 
-interface DrillRow {
-  drill_name: string;
-  player_count: number;
-  depth: number;
-}
-
 export function createBenchmarkWorkload(options: WorkloadOptions): BenchmarkWorkload {
   const db = new Database(options.sourceDbPath, { readonly: true });
 
@@ -187,8 +157,6 @@ export function createBenchmarkWorkload(options: WorkloadOptions): BenchmarkWork
       seed: options.seed,
       dimensions: stats.map((item) => dimensionKey(item.dimension)),
       handQueries: sampler.sampleHandQueries(options.handIterations),
-      fullRangeQueries: sampler.sampleFullRangeQueries(options.fullRangeIterations),
-      drillQueries: sampler.sampleDrillQueries(options.drillIterations),
       batchQueries: sampler.sampleBatchQueries(options.batchIterations, options.batchSize),
       batchSize: options.batchSize,
     };
@@ -326,8 +294,6 @@ ${coldStart}
 ## Workload
 
 - 单手牌查询：${formatNumber(report.workload.handQueries)}
-- 全 range 查询：${formatNumber(report.workload.fullRangeQueries)}
-- drill 场景查询：${formatNumber(report.workload.drillQueries)}
 - 批量查询：${formatNumber(report.workload.batchQueries)}
 - batch size：${formatNumber(report.workload.batchSize)}
 - warmup iterations：${formatNumber(report.options.warmupIterations)}
@@ -409,7 +375,6 @@ function getSamplingStats(db: Database, dimension: RangeDimension): SamplingStat
 class WorkloadSampler {
   private readonly totalRows: number;
   private readonly sampleStatements = new Map<string, { nextById: QueryLike; first: QueryLike }>();
-  private readonly drillRowsByDimension = new Map<string, DrillRow[]>();
 
   constructor(
     private readonly db: Database,
@@ -434,61 +399,6 @@ class WorkloadSampler {
 
     while (result.length < count) {
       result.push(this.sampleHandQuery());
-    }
-
-    return result;
-  }
-
-  sampleFullRangeQueries(count: number): FullRangeBenchmarkItem[] {
-    const result: FullRangeBenchmarkItem[] = [];
-    const seen = new Set<string>();
-    const maxAttempts = Math.max(count * 20, count + 100);
-
-    for (let attempts = 0; result.length < count && attempts < maxAttempts; attempts++) {
-      const item = this.sampleHandQuery();
-      const key = `${dimensionKey(item)}:${item.concreteLineId}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      result.push({
-        strategy: item.strategy,
-        playerCount: item.playerCount,
-        depthBb: item.depthBb,
-        concreteLineId: item.concreteLineId,
-      });
-    }
-
-    while (result.length < count) {
-      const item = this.sampleHandQuery();
-      result.push({
-        strategy: item.strategy,
-        playerCount: item.playerCount,
-        depthBb: item.depthBb,
-        concreteLineId: item.concreteLineId,
-      });
-    }
-
-    return result;
-  }
-
-  sampleDrillQueries(count: number): DrillBenchmarkItem[] {
-    const dimensionsWithDrills = this.stats.filter((item) => this.getDrillRows(item.dimension).length > 0);
-    if (dimensionsWithDrills.length === 0) return [];
-
-    const result: DrillBenchmarkItem[] = [];
-    for (let index = 0; index < count; index++) {
-      const stats = this.random.pick(dimensionsWithDrills);
-      const drills = this.getDrillRows(stats.dimension);
-      const drill = this.random.pick(drills);
-      const hand = this.sampleHandQuery(stats);
-
-      result.push({
-        strategy: stats.dimension.strategy,
-        drillName: drill.drill_name,
-        playerCount: drill.player_count,
-        drillDepth: drill.depth,
-        depthBb: stats.dimension.depthBb,
-        holeCards: hand.holeCards,
-      });
     }
 
     return result;
@@ -577,26 +487,6 @@ class WorkloadSampler {
     return statements;
   }
 
-  private getDrillRows(dimension: RangeDimension): DrillRow[] {
-    const key = dimensionKey(dimension);
-    const cached = this.drillRowsByDimension.get(key);
-    if (cached) return cached;
-
-    const tableName = `drill_scenario_lines_${dimension.strategy}`;
-    const rows = this.db
-      .query(`
-        SELECT drill_name, player_count, depth
-        FROM ${quoteIdentifier(tableName)}
-        WHERE player_count = ?
-          AND depth = ?
-        GROUP BY drill_name, player_count, depth
-        ORDER BY drill_name
-      `)
-      .all(dimension.playerCount, dimension.depthBb) as DrillRow[];
-
-    this.drillRowsByDimension.set(key, rows);
-    return rows;
-  }
 }
 
 interface SeededRandom {
