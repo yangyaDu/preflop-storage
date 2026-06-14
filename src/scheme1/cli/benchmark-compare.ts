@@ -116,11 +116,14 @@ function buildCompareReport(
 }
 
 function isWorkloadCompatible(sqliteReport: BenchmarkRunReport, binaryReport: BenchmarkRunReport): boolean {
+  const sameWorkloadSource = sqliteReport.workloadSource === binaryReport.workloadSource;
+  const sameWorkloadPath = sqliteReport.workloadPath === binaryReport.workloadPath;
+
   return (
+    sameWorkloadSource &&
+    sameWorkloadPath &&
     sqliteReport.options.seed === binaryReport.options.seed &&
     sqliteReport.workload.handQueries === binaryReport.workload.handQueries &&
-    sqliteReport.workload.batchQueries === binaryReport.workload.batchQueries &&
-    sqliteReport.workload.batchSize === binaryReport.workload.batchSize &&
     sqliteReport.workload.dimensions.join("\0") === binaryReport.workload.dimensions.join("\0")
   );
 }

@@ -52,6 +52,30 @@ export function getBooleanArg(args: CliArgs, key: string): boolean {
   return args[key] === true || args[key] === "true";
 }
 
+export function getNumberListArg(args: CliArgs, key: string, fallback?: number[]): number[] {
+  const value = args[key];
+  if (value === undefined || value === true) {
+    if (fallback !== undefined) return fallback;
+    throw new Error(`Missing required --${key}`);
+  }
+
+  const text = Array.isArray(value) ? value[value.length - 1] : String(value);
+  const numbers = text.split(",").map((part) => {
+    const n = Number(part.trim());
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+      throw new Error(`Invalid number in --${key}: ${part}`);
+    }
+    return n;
+  });
+
+  if (numbers.length === 0) {
+    if (fallback !== undefined) return fallback;
+    throw new Error(`Empty --${key} list`);
+  }
+
+  return numbers;
+}
+
 export function getRepeatedStringArgs(args: CliArgs, key: string): string[] {
   const value = args[key];
   if (value === undefined || value === true) return [];

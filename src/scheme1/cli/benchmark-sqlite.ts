@@ -4,55 +4,82 @@ import {
   getMemorySnapshot,
   measureBenchmarkCase,
   parseRequestedDimension,
+  readWorkloadJson,
   type BenchmarkRunReport,
+  type BenchmarkWorkload,
 } from "../../benchmark/common";
 import { measureSqliteColdStart, SqliteBenchmarkRunner } from "../benchmark/sqlite-runner";
-import { getNumberArg, getRepeatedStringArgs, getStringArg, parseCliArgs } from "../../cli/args";
+import { getNumberArg, getNumberListArg, getRepeatedStringArgs, getStringArg, parseCliArgs } from "../../cli/args";
 
 const args = parseCliArgs(Bun.argv.slice(2));
 
 const sourceDbPath = getStringArg(args, "source", "range-db/range.db");
 const outPath = getStringArg(args, "out", "reports/benchmark-sqlite.json");
 const mdPath = getStringArg(args, "md", "reports/benchmark-sqlite.md");
+const workloadPath = args.workload !== undefined && args.workload !== true ? getStringArg(args, "workload") : undefined;
 const seed = getNumberArg(args, "seed", 42);
 const defaultIterations = getNumberArg(args, "iterations", 1000);
 const handIterations = getNumberArg(args, "hand-iterations", defaultIterations);
 const batchIterations = getNumberArg(args, "batch-iterations", Math.min(defaultIterations, 200));
 const batchSize = getNumberArg(args, "batch-size", 20);
+const batchSizes = getNumberListArg(args, "batch-sizes", [1, 5, 10, 50, 100]);
 const warmupIterations = getNumberArg(args, "warmup-iterations", 20);
 const requestedDimensionValues = getRepeatedStringArgs(args, "dimension");
 const requestedDimensions = requestedDimensionValues.map(parseRequestedDimension);
 
-const workload = createBenchmarkWorkload({
-  sourceDbPath,
-  requestedDimensions,
-  seed,
-  handIterations,
-  batchIterations,
-  batchSize,
-});
+let workload: BenchmarkWorkload;
+let workloadSource: "generated" | "loaded";
+
+if (workloadPath) {
+  workload = await readWorkloadJson(workloadPath);
+  workloadSource = "loaded";
+} else {
+  workload = createBenchmarkWorkload({
+    sourceDbPath,
+    requestedDimensions,
+    seed,
+    handIterations,
+    batchIterations,
+    batchSize,
+    batchSizes,
+  });
+  workloadSource = "generated";
+}
 
 const coldStart = measureSqliteColdStart(sourceDbPath, workload.handQueries[0]);
 const memoryBefore = getMemorySnapshot();
 const runner = new SqliteBenchmarkRunner(sourceDbPath);
 
 try {
-  const cases = [
-    await measureBenchmarkCase({
-      name: "hand-strategy",
-      description: "Single concrete_line_id + hand query from old SQLite range rows.",
-      items: workload.handQueries,
-      warmupIterations,
-      operation: (item) => runner.getHandStrategy(item),
-    }),
-    await measureBenchmarkCase({
-      name: "batch-hand-strategy",
-      description: "Run a batch of concrete_line_id + hand lookups.",
-      items: workload.batchQueries,
-      warmupIterations,
-      operation: (item) => runner.getHandStrategiesBatch(item),
-    }),
-  ];
+  const handCase = await measureBenchmarkCase({
+    name: "hand-strategy",
+    description: "Single concrete_line_id + hand query from old SQLite range rows.",
+    items: workload.handQueries,
+    warmupIterations,
+    operation: (item) => runner.getHandStrategy(item),
+  });
+
+  const batchCase = await measureBenchmarkCase({
+    name: "batch-hand-strategy",
+    description: "Run a batch of concrete_line_id + hand lookups.",
+    items: workload.batchQueries,
+    warmupIterations,
+    operation: (item) => runner.getHandStrategiesBatch(item),
+  });
+
+  const batchSizeCases = await Promise.all(
+    [...workload.batchQueriesBySize.entries()].map(([size, queries]) =>
+      measureBenchmarkCase({
+        name: `batch-size-${size}`,
+        description: `Run ${size} lookups per batch.`,
+        items: queries,
+        warmupIterations,
+        operation: (item) => runner.getHandStrategiesBatch(item),
+      }),
+    ),
+  );
+
+  const cases = [handCase, batchCase, ...batchSizeCases];
 
   const memoryAfter = getMemorySnapshot();
   const report: BenchmarkRunReport = {
@@ -65,6 +92,7 @@ try {
       handIterations,
       batchIterations,
       batchSize,
+      batchSizes,
       warmupIterations,
     },
     workload: {
@@ -73,6 +101,8 @@ try {
       batchQueries: workload.batchQueries.length,
       batchSize: workload.batchSize,
     },
+    workloadSource,
+    workloadPath,
     coldStart,
     cases,
     totals: buildTotals(cases),

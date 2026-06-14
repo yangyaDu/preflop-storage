@@ -35,6 +35,7 @@ export interface BenchmarkWorkload {
   handQueries: HandBenchmarkItem[];
   batchQueries: BatchBenchmarkItem[];
   batchSize: number;
+  batchQueriesBySize: Map<number, BatchBenchmarkItem[]>;
 }
 
 export interface WorkloadOptions {
@@ -44,6 +45,7 @@ export interface WorkloadOptions {
   handIterations: number;
   batchIterations: number;
   batchSize: number;
+  batchSizes: number[];
 }
 
 export interface MemorySnapshot {
@@ -91,9 +93,11 @@ export interface BenchmarkRunReport {
     handIterations: number;
     batchIterations: number;
     batchSize: number;
+    batchSizes: number[];
     warmupIterations: number;
     verifyChecksums?: boolean;
     packCacheSize?: number;
+    verifyResults?: boolean;
   };
   workload: {
     dimensions: string[];
@@ -101,6 +105,8 @@ export interface BenchmarkRunReport {
     batchQueries: number;
     batchSize: number;
   };
+  workloadSource: "generated" | "loaded";
+  workloadPath?: string;
   coldStart: ColdStartResult | null;
   cases: BenchmarkCaseResult[];
   totals: {
@@ -153,12 +159,23 @@ export function createBenchmarkWorkload(options: WorkloadOptions): BenchmarkWork
     const random = createSeededRandom(options.seed);
     const sampler = new WorkloadSampler(db, stats, random);
 
+    // Ensure batchSize is always included in batchSizes
+    const batchSizes = options.batchSizes.length > 0
+      ? Array.from(new Set([...options.batchSizes, options.batchSize])).sort((a, b) => a - b)
+      : [options.batchSize];
+    const batchQueriesBySize = new Map<number, BatchBenchmarkItem[]>();
+
+    for (const size of batchSizes) {
+      batchQueriesBySize.set(size, sampler.sampleBatchQueries(options.batchIterations, size));
+    }
+
     return {
       seed: options.seed,
       dimensions: stats.map((item) => dimensionKey(item.dimension)),
       handQueries: sampler.sampleHandQueries(options.handIterations),
-      batchQueries: sampler.sampleBatchQueries(options.batchIterations, options.batchSize),
+      batchQueries: batchQueriesBySize.get(options.batchSize) ?? batchQueriesBySize.get(batchSizes[0]) ?? [],
       batchSize: options.batchSize,
+      batchQueriesBySize,
     };
   } finally {
     db.close();
@@ -182,10 +199,12 @@ export async function measureBenchmarkCase<T>(params: {
   let resultCount = 0;
   let errorCount = 0;
   let firstError: string | null = null;
+  const timesMs: number[] = [];
 
   // 批量计时：整个循环只打两次 performance.now()，避免 per-iteration 开销污染数据
   const caseStart = performance.now();
   for (let index = 0; index < params.items.length; index++) {
+    const t0 = performance.now();
     try {
       const result = params.operation(params.items[index], index);
       resultCount += isPromise(result) ? await result : result;
@@ -193,11 +212,14 @@ export async function measureBenchmarkCase<T>(params: {
       errorCount += 1;
       firstError ??= error instanceof Error ? error.message : String(error);
     }
+    timesMs.push(performance.now() - t0);
   }
   const totalMs = performance.now() - caseStart;
 
   // avgMs 和 QPS 基于批量计时
   const avgMs = params.items.length > 0 ? totalMs / params.items.length : 0;
+
+  const sorted = timesMs.sort((a, b) => a - b);
 
   return {
     name: params.name,
@@ -206,10 +228,10 @@ export async function measureBenchmarkCase<T>(params: {
     warmupIterations,
     totalMs,
     avgMs,
-    p50Ms: 0,
-    p95Ms: 0,
-    p99Ms: 0,
-    maxMs: 0,
+    p50Ms: percentile(sorted, 50),
+    p95Ms: percentile(sorted, 95),
+    p99Ms: percentile(sorted, 99),
+    maxMs: sorted.length > 0 ? sorted[sorted.length - 1] : 0,
     qps: safeRatio(params.items.length, totalMs / 1000),
     resultCount,
     errorCount,
@@ -238,6 +260,55 @@ export function getMemorySnapshot(): MemorySnapshot {
     heapUsedBytes: usage.heapUsed,
     externalBytes: usage.external,
     arrayBuffersBytes: usage.arrayBuffers ?? 0,
+  };
+}
+
+export async function writeWorkloadJson(path: string, workload: BenchmarkWorkload): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await Bun.write(
+    path,
+    `${JSON.stringify(
+      {
+        seed: workload.seed,
+        dimensions: workload.dimensions,
+        handQueries: workload.handQueries,
+        batchQueries: workload.batchQueries,
+        batchSize: workload.batchSize,
+        batchQueriesBySize: [...workload.batchQueriesBySize.entries()],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+}
+
+export async function readWorkloadJson(path: string): Promise<BenchmarkWorkload> {
+  const raw = JSON.parse(await Bun.file(path).text());
+  const batchQueriesBySize = new Map<number, BatchBenchmarkItem[]>();
+
+  if (raw.batchQueriesBySize && Array.isArray(raw.batchQueriesBySize)) {
+    for (const [size, queries] of raw.batchQueriesBySize) {
+      batchQueriesBySize.set(Number(size), queries as BatchBenchmarkItem[]);
+    }
+  }
+
+  // 兼容旧 workload 文件：从 batchQueries/batchSize 回退
+  if (batchQueriesBySize.size === 0 && Array.isArray(raw.batchQueries)) {
+    const fallbackSize = typeof raw.batchSize === "number" && raw.batchSize > 0 ? raw.batchSize : 20;
+    batchQueriesBySize.set(fallbackSize, raw.batchQueries as BatchBenchmarkItem[]);
+  }
+
+  const firstEntry = batchQueriesBySize.entries().next();
+  const defaultBatchQueries = firstEntry.done ? [] : firstEntry.value[1];
+  const defaultBatchSize = firstEntry.done ? 20 : firstEntry.value[0];
+
+  return {
+    seed: raw.seed,
+    dimensions: raw.dimensions ?? [],
+    handQueries: raw.handQueries ?? [],
+    batchQueries: raw.batchQueries ?? defaultBatchQueries,
+    batchSize: raw.batchSize ?? defaultBatchSize,
+    batchQueriesBySize,
   };
 }
 
@@ -293,6 +364,7 @@ ${coldStart}
 
 ## Workload
 
+- workload 来源：${report.workloadSource}${report.workloadPath ? ` (\`${report.workloadPath}\`)` : ""}
 - 单手牌查询：${formatNumber(report.workload.handQueries)}
 - 批量查询：${formatNumber(report.workload.batchQueries)}
 - batch size：${formatNumber(report.workload.batchSize)}
@@ -375,6 +447,8 @@ function getSamplingStats(db: Database, dimension: RangeDimension): SamplingStat
 class WorkloadSampler {
   private readonly totalRows: number;
   private readonly sampleStatements = new Map<string, { nextById: QueryLike; first: QueryLike }>();
+  private readonly strataCount = 5;
+  private readonly strataIndices = new Map<string, number>();
 
   constructor(
     private readonly db: Database,
@@ -382,6 +456,10 @@ class WorkloadSampler {
     private readonly random: SeededRandom,
   ) {
     this.totalRows = sum(stats.map((item) => item.rowCount));
+
+    for (const stat of this.stats) {
+      this.strataIndices.set(dimensionKey(stat.dimension), 0);
+    }
   }
 
   sampleHandQueries(count: number): HandBenchmarkItem[] {
@@ -390,7 +468,7 @@ class WorkloadSampler {
     const maxAttempts = Math.max(count * 20, count + 100);
 
     for (let attempts = 0; result.length < count && attempts < maxAttempts; attempts++) {
-      const item = this.sampleHandQuery();
+      const item = this.sampleStratifiedHandQuery();
       const key = `${dimensionKey(item)}:${item.concreteLineId}:${item.holeCards}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -398,7 +476,7 @@ class WorkloadSampler {
     }
 
     while (result.length < count) {
-      result.push(this.sampleHandQuery());
+      result.push(this.sampleStratifiedHandQuery());
     }
 
     return result;
@@ -411,8 +489,19 @@ class WorkloadSampler {
     for (let index = 0; index < count; index++) {
       const stats = this.pickStats();
       const requests: BatchBenchmarkItem["requests"] = [];
+      const seenInBatch = new Set<string>();
+      const maxRetries = safeBatchSize * 3;
+
       for (let requestIndex = 0; requestIndex < safeBatchSize; requestIndex++) {
-        const item = this.sampleHandQuery(stats);
+        let item = this.sampleHandQuery(stats);
+        let key = `${item.concreteLineId}:${item.holeCards}`;
+
+        for (let retry = 0; retry < maxRetries && seenInBatch.has(key); retry++) {
+          item = this.sampleHandQuery(stats);
+          key = `${item.concreteLineId}:${item.holeCards}`;
+        }
+
+        seenInBatch.add(key);
         requests.push({
           concreteLineId: item.concreteLineId,
           holeCards: item.holeCards,
@@ -428,6 +517,29 @@ class WorkloadSampler {
     }
 
     return result;
+  }
+
+  private sampleStratifiedHandQuery(): HandBenchmarkItem {
+    const stats = this.pickStats();
+    const dimKey = dimensionKey(stats.dimension);
+    const stratumIndex = this.strataIndices.get(dimKey) ?? 0;
+    this.strataIndices.set(dimKey, (stratumIndex + 1) % this.strataCount);
+
+    const rangeSize = stats.maxId - stats.minId + 1;
+    const stratumStart = stats.minId + Math.floor((stratumIndex / this.strataCount) * rangeSize);
+    const stratumEnd = stats.minId + Math.floor(((stratumIndex + 1) / this.strataCount) * rangeSize) - 1;
+    const stratumSize = Math.max(1, stratumEnd - stratumStart + 1);
+
+    const randomId = stratumStart + this.random.nextInt(stratumSize);
+    const row = this.sampleRangeRowById(stats, randomId);
+
+    return {
+      strategy: stats.dimension.strategy,
+      playerCount: stats.dimension.playerCount,
+      depthBb: stats.dimension.depthBb,
+      concreteLineId: row.concrete_line_id,
+      holeCards: row.hole_cards,
+    };
   }
 
   private sampleHandQuery(forcedStats?: SamplingStats): HandBenchmarkItem {
@@ -454,8 +566,12 @@ class WorkloadSampler {
   }
 
   private sampleRangeRow(stats: SamplingStats): SampledRangeRow {
-    const statements = this.getSampleStatements(stats.dimension.rangeTable);
     const randomId = stats.minId + this.random.nextInt(Math.max(1, stats.maxId - stats.minId + 1));
+    return this.sampleRangeRowById(stats, randomId);
+  }
+
+  private sampleRangeRowById(stats: SamplingStats, randomId: number): SampledRangeRow {
+    const statements = this.getSampleStatements(stats.dimension.rangeTable);
     const row = statements.nextById.get(randomId) ?? statements.first.get();
     if (!row) {
       throw new Error(`Could not sample row from ${stats.dimension.rangeTable}`);
@@ -514,6 +630,16 @@ function createSeededRandom(seed: number): SeededRandom {
       return items[Math.floor(next() * items.length)];
     },
   };
+}
+
+function percentile(sorted: number[], p: number): number {
+  if (sorted.length === 0) return 0;
+  const index = (p / 100) * (sorted.length - 1);
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  if (lower === upper) return sorted[lower];
+  const frac = index - lower;
+  return sorted[lower] * (1 - frac) + sorted[upper] * frac;
 }
 
 function sum(values: number[]): number {
