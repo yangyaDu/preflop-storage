@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { crc32c } from "../../binary/crc32c";
 import { RangeBinWriter } from "../../binary/range-bin-writer";
 import {
+  dimensionKey,
+  getConcreteLinesTableName,
   getDrillScenarioTableName,
   quoteIdentifier,
   type RangeDimension,
@@ -26,6 +28,7 @@ export interface BuildBinaryStoreSchema2Options {
 
 interface BuildStatements {
   insertDrillLineByStrategy: Map<string, ReturnType<Database["prepare"]>>;
+  insertConcreteLineByDimension: Map<string, ReturnType<Database["prepare"]>>;
   selectActionSchema: ReturnType<Database["prepare"]>;
   insertActionSchema: ReturnType<Database["prepare"]>;
   lastInsertId: ReturnType<Database["prepare"]>;
@@ -58,6 +61,9 @@ export async function buildBinaryStoreScheme2(options: BuildBinaryStoreSchema2Op
     metaDb.exec("BEGIN");
     try {
       copyDrillScenarioLines({ sourceDb, statements, strategies });
+      for (const dimension of dimensions) {
+        copyConcreteLines({ sourceDb, statements, dimension });
+      }
       metaDb.exec("COMMIT");
     } catch (error) {
       metaDb.exec("ROLLBACK");
@@ -110,6 +116,7 @@ function uniqueStrategies(dimensions: RangeDimension[]): string[] {
 
 function prepareBuildStatements(metaDb: Database, dimensions: RangeDimension[]): BuildStatements {
   const insertDrillLineByStrategy = new Map<string, ReturnType<Database["prepare"]>>();
+  const insertConcreteLineByDimension = new Map<string, ReturnType<Database["prepare"]>>();
 
   const strategies = uniqueStrategies(dimensions);
   for (const strategy of strategies) {
@@ -122,8 +129,22 @@ function prepareBuildStatements(metaDb: Database, dimensions: RangeDimension[]):
     );
   }
 
+  for (const dimension of dimensions) {
+    const { strategy, playerCount, depthBb } = dimension;
+    insertConcreteLineByDimension.set(
+      dimensionKey(dimension),
+      metaDb.prepare(`
+        INSERT OR IGNORE INTO ${quoteIdentifier(getConcreteLinesTableName(strategy, playerCount, depthBb))}(
+          concrete_line_id, abstract_line, concrete_line
+        )
+        VALUES (?, ?, ?)
+      `),
+    );
+  }
+
   return {
     insertDrillLineByStrategy,
+    insertConcreteLineByDimension,
     selectActionSchema: metaDb.prepare("SELECT id FROM action_schemas WHERE schema_key = ?"),
     insertActionSchema: metaDb.prepare(`
       INSERT INTO action_schemas(action_count, action_blob, checksum, schema_key)
@@ -164,6 +185,28 @@ function copyDrillScenarioLines(params: {
     for (const row of rows) {
       statement.run(row.drill_name, row.abstract_line, row.player_count, row.depth);
     }
+  }
+}
+
+function copyConcreteLines(params: {
+  sourceDb: Database;
+  statements: BuildStatements;
+  dimension: RangeDimension;
+}): void {
+  const key = dimensionKey(params.dimension);
+  const statement = params.statements.insertConcreteLineByDimension.get(key);
+  if (!statement) throw new Error(`Missing concrete insert statement for dimension ${key}`);
+
+  const rows = params.sourceDb
+    .query(`
+      SELECT id, abstract_line, concrete_line
+      FROM ${quoteIdentifier(params.dimension.concreteTable)}
+      ORDER BY id
+    `)
+    .iterate() as IterableIterator<{ id: number; abstract_line: string; concrete_line: string }>;
+
+  for (const row of rows) {
+    statement.run(row.id, row.abstract_line, row.concrete_line);
   }
 }
 

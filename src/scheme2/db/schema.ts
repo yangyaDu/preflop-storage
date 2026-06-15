@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import {
+  getConcreteLinesTableName,
   getDrillScenarioTableName,
   quoteIdentifier,
 } from "./naming";
@@ -10,8 +11,8 @@ import {
  * 与方案一不同，方案二不创建 range_pack_index_* 表 —
  * 索引数据存储在独立的 .idx 文件中（mmap + 二分查找）。
  *
- * 方案二也不创建 concrete_lines_* 表 — 查询服务无需 ID → 名称映射，
- * 因为所有查询路径都是纯数值 ID：.idx 二分 → .bin 解码。
+ * 方案二保留 concrete_lines_* 表，用于场景级查询和 abstract_line → concrete_line 展开。
+ * range pack 索引仍由独立 .idx 文件提供。
  */
 export function initLightMetaDb(
   db: Database,
@@ -49,6 +50,17 @@ export function initLightMetaDb(
         player_count INTEGER NOT NULL,
         drill_depth INTEGER NOT NULL DEFAULT 0,
         UNIQUE(drill_name, player_count, drill_depth, abstract_line)
+      );
+    `);
+  }
+
+  for (const { strategy, playerCount, depthBb } of dimensions) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ${quoteIdentifier(getConcreteLinesTableName(strategy, playerCount, depthBb))} (
+        concrete_line_id INTEGER PRIMARY KEY,
+        abstract_line TEXT NOT NULL,
+        concrete_line TEXT NOT NULL,
+        UNIQUE(abstract_line, concrete_line)
       );
     `);
   }

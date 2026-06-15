@@ -6,6 +6,7 @@ import {
   getMemorySnapshot,
   measureBenchmarkCase,
   parseRequestedDimension,
+  parseWorkloadMode,
   readWorkloadJson,
   type BenchmarkRunReport,
   type BenchmarkWorkload,
@@ -32,8 +33,10 @@ const batchIterations = getNumberArg(args, "batch-iterations", Math.min(defaultI
 const batchSize = getNumberArg(args, "batch-size", 20);
 const batchSizes = getNumberListArg(args, "batch-sizes", [1, 5, 10, 50, 100]);
 const warmupIterations = getNumberArg(args, "warmup-iterations", 20);
+const workloadMode = parseWorkloadMode(getStringArg(args, "workload-mode", "random"));
 const verifyChecksums = getBooleanArg(args, "verify-checksum");
 const verifyResults = getBooleanArg(args, "verify-results");
+const prewarmActionSchemas = getBooleanArg(args, "prewarm-action-schemas");
 const requestedDimensionValues = getRepeatedStringArgs(args, "dimension");
 const requestedDimensions = requestedDimensionValues.map(parseRequestedDimension);
 
@@ -52,12 +55,14 @@ if (workloadPath) {
     batchIterations,
     batchSize,
     batchSizes,
+    workloadMode,
   });
   workloadSource = "generated";
 }
 
 const runnerOptions = {
   verifyChecksums,
+  prewarmActionSchemas,
 };
 
 const coldStart = await measureScheme2ColdStart({
@@ -82,23 +87,25 @@ try {
 
   const batchCase = await measureBenchmarkCase({
     name: "batch-hand-strategy",
-    description: "Run a batch of concrete_line_id + hand lookups through Scheme2 batch API.",
+    description: "Run a batch of concrete_line_id + hand lookups through Scheme2 batch API (sync).",
     items: workload.batchQueries,
     warmupIterations,
-    operation: (item) => runner.getHandStrategiesBatch(item),
+    operation: (item) => runner.getHandStrategiesBatchSync(item),
   });
 
-  const batchSizeCases = await Promise.all(
-    [...workload.batchQueriesBySize.entries()].map(([size, queries]) =>
-      measureBenchmarkCase({
+  // Sequential execution for accurate per-case measurement (avoids concurrent GC pressure)
+  const batchSizeCases: Awaited<ReturnType<typeof measureBenchmarkCase>>[] = [];
+  for (const [size, queries] of workload.batchQueriesBySize) {
+    batchSizeCases.push(
+      await measureBenchmarkCase({
         name: `batch-size-${size}`,
-        description: `Run ${size} lookups per batch through Scheme2 batch API.`,
+        description: `Run ${size} lookups per batch through Scheme2 batch API (sync).`,
         items: queries,
         warmupIterations,
-        operation: (item) => runner.getHandStrategiesBatch(item),
+        operation: (item) => runner.getHandStrategiesBatchSync(item),
       }),
-    ),
-  );
+    );
+  }
 
   const cases = [handCase, batchCase, ...batchSizeCases];
 
@@ -113,6 +120,10 @@ try {
   if (verifyResults) {
     const verifyNotes = await runResultVerification(sourceDbPath, workload.handQueries);
     notes.push(...verifyNotes);
+  }
+
+  if (prewarmActionSchemas) {
+    notes.push("Action schemas are prewarmed into the Scheme2QueryService cache before hot measurements.");
   }
 
   const report: BenchmarkRunReport = {
@@ -131,6 +142,8 @@ try {
       warmupIterations,
       verifyChecksums,
       verifyResults,
+      prewarmActionSchemas,
+      workloadMode: workload.mode,
     },
     workload: {
       dimensions: workload.dimensions,

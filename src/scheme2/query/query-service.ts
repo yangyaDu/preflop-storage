@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { decodeActionSchema, normalizeActionName, type ActionDef, type ActionName } from "../../binary/action-schema-codec";
 import { assertCrc32c } from "../../binary/crc32c";
+import { RangeBinFileReader } from "../../binary/range-bin-file-reader";
 import { decodeRangePackForHand, decodeRangePackMaskMatch } from "../../binary/range-pack-codec";
 import { getHandCode, getHandId } from "../../hand/hand-dict";
 import { PreflopQueryError, toPreflopQueryErrorInfo, type PreflopQueryErrorInfo } from "../../query/errors";
@@ -12,6 +13,7 @@ import {
   quoteIdentifier,
 } from "../../db/naming";
 import { getIdxFileName } from "../db/naming";
+import { RangeIdxReader } from "../idx/idx-reader";
 
 // Rust native addon — replaces RangeIdxReader + RangeBinReader for the hot path.
 import { DimensionHandle, type BatchQueryRequest, type PackDecodeResult } from "../../../native-addon/index.js";
@@ -56,6 +58,7 @@ export interface ActionSchemaRow {
 
 export interface Scheme2QueryServiceOptions {
   verifyChecksums?: boolean;
+  prewarmActionSchemas?: boolean;
 }
 
 export class Scheme2QueryService {
@@ -69,6 +72,9 @@ export class Scheme2QueryService {
     private readonly options: Scheme2QueryServiceOptions = {},
   ) {
     this.metaDb = new Database(metaDbPath, { readonly: true });
+    if (this.options.prewarmActionSchemas) {
+      this.prewarmActionSchemas();
+    }
   }
 
   getDrillScenarioLines(params: {
@@ -145,6 +151,42 @@ export class Scheme2QueryService {
       }
       throw error;
     }
+  }
+
+  /**
+   * 预热 action_schemas 到 TS 内存缓存。
+   *
+   * Rust 热路径返回 actionSchemaId + cell 数据；如果 schema 没有预热，
+   * 第一次遇到新 schema 时仍会回 meta.db 查询，随机 workload 会被这个成本拖慢。
+   */
+  prewarmActionSchemas(actionSchemaIds?: Iterable<number>): number {
+    if (actionSchemaIds) {
+      let loaded = 0;
+      for (const actionSchemaId of actionSchemaIds) {
+        if (!this.actionCache.has(actionSchemaId)) {
+          this.getActionSchema(actionSchemaId);
+          loaded += 1;
+        }
+      }
+      return loaded;
+    }
+
+    const rows = this.metaDb
+      .query(`
+        SELECT id, action_count, action_blob
+        FROM action_schemas
+        ORDER BY id
+      `)
+      .all() as ActionSchemaRow[];
+
+    let loaded = 0;
+    for (const row of rows) {
+      if (this.actionCache.has(row.id)) continue;
+      this.actionCache.set(row.id, this.decodeActionSchemaRow(row));
+      loaded += 1;
+    }
+
+    return loaded;
   }
 
   async getHandStrategy(params: {
@@ -234,60 +276,73 @@ export class Scheme2QueryService {
       }));
     }
 
-    // Build Rust batch query requests
-    const rustRequests: BatchQueryRequest[] = [];
-    const handIdMap = new Map<number, number>(); // index → handId
+    return this.batchQuerySync(handle, params.requests);
+  }
 
-    for (let i = 0; i < params.requests.length; i++) {
-      const req = params.requests[i];
-      try {
-        const handId = this.getKnownHandId(req.holeCards);
-        rustRequests.push({ concreteLineId: req.concreteLineId, handId });
-        handIdMap.set(i, handId);
-      } catch (_error) {
-        // Will be handled below
-        handIdMap.set(i, -1);
-        rustRequests.push({ concreteLineId: req.concreteLineId, handId: 0 }); // placeholder
-      }
+  /**
+   * 同步版批量查询。要求通过 prewarmDimension() 提前预热对应维度的 handle。
+   */
+  getHandStrategiesBatchSync(params: {
+    strategy?: string;
+    playerCount: number;
+    depthBb: number;
+    requests: BatchHandStrategyRequest[];
+  }): BatchHandStrategyResult[] {
+    if (params.requests.length === 0) return [];
+
+    const strategy = params.strategy ?? "default";
+    const idxFileName = getIdxFileName(strategy, params.playerCount, params.depthBb);
+    const binFileName = getBinFileName(strategy, params.playerCount, params.depthBb);
+    const key = `${idxFileName}|${binFileName}`;
+    const handle = this.handles.get(key);
+
+    if (!handle) {
+      throw new PreflopQueryError("BIN_FILE_NOT_FOUND", `Dimension handle not cached. Call prewarmDimension() first.`, {
+        idxFileName,
+        binFileName,
+      });
     }
 
-    // Execute batch query in Rust
-    const rustResults = handle.queryBatch(rustRequests, this.options.verifyChecksums ?? false);
+    return this.batchQuerySync(handle, params.requests);
+  }
 
-    return params.requests.map((request, i) => {
-      const handId = handIdMap.get(i);
-      if (handId === undefined || handId === -1) {
-        return {
-          ...request,
-          strategy: null,
-          error: toPreflopQueryErrorInfo(
-            new PreflopQueryError("UNKNOWN_HAND", `Unknown hole cards: ${request.holeCards}`, {
-              holeCards: request.holeCards,
-            }),
-          ),
-        };
-      }
+  /**
+   * 轻量同步批量查询：仅返回总 action 计数，跳过 action schema 装配。
+   * 用于 benchmark 等不需要完整 HandStrategy 的场景。
+   */
+  getHandStrategiesCountBatchSync(params: {
+    strategy?: string;
+    playerCount: number;
+    depthBb: number;
+    requests: BatchHandStrategyRequest[];
+  }): number {
+    if (params.requests.length === 0) return 0;
 
-      const fragment = rustResults[i];
-      if (!fragment) {
-        return {
-          ...request,
-          strategy: null,
-          error: toPreflopQueryErrorInfo(
-            new PreflopQueryError("PACK_NOT_FOUND", `Range pack not found for concrete line ${request.concreteLineId}`, {
-              concreteLineId: request.concreteLineId,
-            }),
-          ),
-        };
-      }
+    const strategy = params.strategy ?? "default";
+    const idxFileName = getIdxFileName(strategy, params.playerCount, params.depthBb);
+    const binFileName = getBinFileName(strategy, params.playerCount, params.depthBb);
+    const key = `${idxFileName}|${binFileName}`;
+    const handle = this.handles.get(key);
 
-      const actions = this.getActionSchema(fragment.actionSchemaId);
-      return {
-        ...request,
-        strategy: this.assembleHandStrategy(request.holeCards, fragment, actions),
-        error: null,
-      };
-    });
+    if (!handle) {
+      throw new PreflopQueryError("BIN_FILE_NOT_FOUND", `Dimension handle not cached. Call prewarmDimension() first.`, {
+        idxFileName,
+        binFileName,
+      });
+    }
+
+    const rustRequests: BatchQueryRequest[] = [];
+    for (const req of params.requests) {
+      const handId = this.getKnownHandId(req.holeCards);
+      rustRequests.push({ concreteLineId: req.concreteLineId, handId });
+    }
+
+    const counts = handle.queryBatchCount(rustRequests);
+    let total = 0;
+    for (const count of counts) {
+      if (count != null) total += count;
+    }
+    return total;
   }
 
   async getHandsByAction(params: {
@@ -299,47 +354,10 @@ export class Scheme2QueryService {
     minFrequency?: number;
   }): Promise<string[]> {
     const strategy = params.strategy ?? "default";
-
-    // Prewarm the handle and read raw pack data for JS-side mask matching
-    try {
-      this.prewarmDimension({ strategy, playerCount: params.playerCount, depthBb: params.depthBb });
-    } catch (error) {
-      throw new PreflopQueryError("PACK_NOT_FOUND", error instanceof Error ? error.message : String(error), {
-        strategy,
-        playerCount: params.playerCount,
-        depthBb: params.depthBb,
-        concreteLineId: params.concreteLineId,
-      });
-    }
-
     const idxFileName = getIdxFileName(strategy, params.playerCount, params.depthBb);
     const binFileName = getBinFileName(strategy, params.playerCount, params.depthBb);
-    const key = `${idxFileName}|${binFileName}`;
-    const handle = this.handles.get(key)!;
-
-    // Use the Rust handle for idx lookup and raw pack read
-    // We need the IdxRecord fields: handCount, actionSchemaId, offset, byteLength
-    // Since the Rust handle only exposes query() and queryBatch(), we need to
-    // get the pack data. Let's query with any handId to get the actionSchemaId,
-    // then use a separate mechanism for the raw pack data.
-    //
-    // For now, use a workaround: query with a handId we know exists.
-    // This is suboptimal for getHandsByAction — a dedicated method would be better,
-    // but this preserves the existing functionality.
-    const fragment = handle.query(params.concreteLineId, 0, this.options.verifyChecksums);
-    if (!fragment) return [];
-
-    const actions = this.getActionSchema(fragment.actionSchemaId);
-
-    // For the full mask-match algorithm, we need raw pack bytes.
-    // The Rust handle doesn't expose raw pack data directly for this advanced path.
-    // Fall back to reading the .bin file via Bun for this specific case.
-    const fullPath = join(this.binaryDir, binFileName);
-    const raw = await Bun.file(fullPath).bytes();
-
-    // Since getHandsByAction is not the hot path, keep existing JS idx reader for it.
-    const { RangeIdxReader } = await import("../idx/idx-reader");
     const idxPath = join(this.binaryDir, idxFileName);
+    const binPath = join(this.binaryDir, binFileName);
     const idxReader = new RangeIdxReader(idxPath);
     await idxReader.open();
 
@@ -347,7 +365,15 @@ export class Scheme2QueryService {
       const idxRecord = idxReader.find(params.concreteLineId);
       if (!idxRecord) return [];
 
-      const bytes = raw.subarray(idxRecord.offset, idxRecord.offset + idxRecord.byteLength);
+      const binReader = new RangeBinFileReader(binPath);
+      binReader.open();
+
+      let bytes: Uint8Array;
+      try {
+        bytes = binReader.read(idxRecord.offset, idxRecord.byteLength);
+      } finally {
+        binReader.close();
+      }
 
       if (this.options.verifyChecksums) {
         try {
@@ -359,6 +385,8 @@ export class Scheme2QueryService {
           });
         }
       }
+
+      const actions = this.getActionSchema(idxRecord.actionSchemaId);
 
       const targetActionNames = params.actionNames;
       const minFrequency = params.minFrequency ?? 0;
@@ -483,6 +511,64 @@ export class Scheme2QueryService {
 
   // ── 内部同步热路径（Rust-backed）──
 
+  private batchQuerySync(
+    handle: DimensionHandle,
+    requests: BatchHandStrategyRequest[],
+  ): BatchHandStrategyResult[] {
+    const rustRequests: BatchQueryRequest[] = [];
+    const requestIndexes: number[] = [];
+    const invalidHandErrors = new Map<number, PreflopQueryErrorInfo>();
+
+    for (let i = 0; i < requests.length; i++) {
+      const req = requests[i];
+      try {
+        const handId = this.getKnownHandId(req.holeCards);
+        rustRequests.push({ concreteLineId: req.concreteLineId, handId });
+        requestIndexes.push(i);
+      } catch (error) {
+        invalidHandErrors.set(i, toPreflopQueryErrorInfo(error));
+      }
+    }
+
+    const rustResults = handle.queryBatch(rustRequests, this.options.verifyChecksums ?? false);
+    const resultByIndex = new Map<number, PackDecodeResult | null>();
+
+    for (let i = 0; i < requestIndexes.length; i++) {
+      resultByIndex.set(requestIndexes[i], rustResults[i] ?? null);
+    }
+
+    return requests.map((request, i) => {
+      const invalidHandError = invalidHandErrors.get(i);
+      if (invalidHandError) {
+        return {
+          ...request,
+          strategy: null,
+          error: invalidHandError,
+        };
+      }
+
+      const fragment = resultByIndex.get(i);
+      if (!fragment) {
+        return {
+          ...request,
+          strategy: null,
+          error: toPreflopQueryErrorInfo(
+            new PreflopQueryError("PACK_NOT_FOUND", `Range pack not found for concrete line ${request.concreteLineId}`, {
+              concreteLineId: request.concreteLineId,
+            }),
+          ),
+        };
+      }
+
+      const actions = this.getActionSchema(fragment.actionSchemaId);
+      return {
+        ...request,
+        strategy: this.assembleHandStrategy(request.holeCards, fragment, actions),
+        error: null,
+      };
+    });
+  }
+
   private queryHandSync(
     holeCards: string,
     concreteLineId: number,
@@ -541,14 +627,18 @@ export class Scheme2QueryService {
       });
     }
 
+    const actions = this.decodeActionSchemaRow(schemaRow);
+    this.actionCache.set(actionSchemaId, actions);
+    return actions;
+  }
+
+  private decodeActionSchemaRow(schemaRow: ActionSchemaRow): ActionDef[] {
     const actionBlob = new Uint8Array(
       schemaRow.action_blob.buffer,
       schemaRow.action_blob.byteOffset,
       schemaRow.action_blob.byteLength,
     );
-    const actions = decodeActionSchema(actionBlob, schemaRow.action_count);
-    this.actionCache.set(actionSchemaId, actions);
-    return actions;
+    return decodeActionSchema(actionBlob, schemaRow.action_count);
   }
 
   private getKnownHandId(holeCards: string): number {

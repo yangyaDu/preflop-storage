@@ -32,6 +32,12 @@ export declare class DimensionHandle {
    * is not in the pack.
    */
   queryBatch(requests: Array<BatchQueryRequest>, verifyChecksum?: boolean | undefined | null): Array<PackDecodeResult | undefined | null>
+  /**
+   * Lightweight batch: return only action cell counts per request.
+   *
+   * Much faster than `queryBatch` — avoids serializing individual cell objects.
+   */
+  queryBatchCount(requests: Array<BatchQueryRequest>): Array<number | undefined | null>
 }
 
 /** A single request in a batch query. */

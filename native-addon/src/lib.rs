@@ -94,6 +94,25 @@ impl DimensionHandle {
             .map(|req| self.query_inner(req.concrete_line_id, req.hand_id as u8, verify))
             .collect()
     }
+
+    /// Lightweight batch: return only action cell counts per request.
+    ///
+    /// Much faster than `query_batch` because it avoids serializing individual
+    /// DecodedCellResult objects across the napi boundary.
+    /// Returns `null` for a request if the concreteLineId/handId is not found.
+    #[napi]
+    pub fn query_batch_count(
+        &self,
+        requests: Vec<BatchQueryRequest>,
+    ) -> Vec<Option<u32>> {
+        requests
+            .into_iter()
+            .map(|req| {
+                self.query_inner(req.concrete_line_id, req.hand_id as u8, false)
+                    .map(|result| result.cells.len() as u32)
+            })
+            .collect()
+    }
 }
 
 impl DimensionHandle {

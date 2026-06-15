@@ -4,6 +4,7 @@ import {
   getMemorySnapshot,
   measureBenchmarkCase,
   parseRequestedDimension,
+  parseWorkloadMode,
   readWorkloadJson,
   type BenchmarkRunReport,
   type BenchmarkWorkload,
@@ -24,6 +25,7 @@ const batchIterations = getNumberArg(args, "batch-iterations", Math.min(defaultI
 const batchSize = getNumberArg(args, "batch-size", 20);
 const batchSizes = getNumberListArg(args, "batch-sizes", [1, 5, 10, 50, 100]);
 const warmupIterations = getNumberArg(args, "warmup-iterations", 20);
+const workloadMode = parseWorkloadMode(getStringArg(args, "workload-mode", "random"));
 const requestedDimensionValues = getRepeatedStringArgs(args, "dimension");
 const requestedDimensions = requestedDimensionValues.map(parseRequestedDimension);
 
@@ -42,6 +44,7 @@ if (workloadPath) {
     batchIterations,
     batchSize,
     batchSizes,
+    workloadMode,
   });
   workloadSource = "generated";
 }
@@ -67,17 +70,18 @@ try {
     operation: (item) => runner.getHandStrategiesBatch(item),
   });
 
-  const batchSizeCases = await Promise.all(
-    [...workload.batchQueriesBySize.entries()].map(([size, queries]) =>
-      measureBenchmarkCase({
+  const batchSizeCases: Awaited<ReturnType<typeof measureBenchmarkCase>>[] = [];
+  for (const [size, queries] of workload.batchQueriesBySize) {
+    batchSizeCases.push(
+      await measureBenchmarkCase({
         name: `batch-size-${size}`,
         description: `Run ${size} lookups per batch.`,
         items: queries,
         warmupIterations,
         operation: (item) => runner.getHandStrategiesBatch(item),
       }),
-    ),
-  );
+    );
+  }
 
   const cases = [handCase, batchCase, ...batchSizeCases];
 
@@ -94,6 +98,7 @@ try {
       batchSize,
       batchSizes,
       warmupIterations,
+      workloadMode: workload.mode,
     },
     workload: {
       dimensions: workload.dimensions,

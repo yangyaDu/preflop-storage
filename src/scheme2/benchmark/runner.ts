@@ -8,18 +8,22 @@ import {
 
 export interface Scheme2BenchmarkRunnerOptions {
   verifyChecksums: boolean;
+  prewarmActionSchemas?: boolean;
 }
 
 export class Scheme2BenchmarkRunner {
   private readonly service: Scheme2QueryService;
+  private readonly options: Scheme2BenchmarkRunnerOptions;
 
   constructor(
     metaDbPath: string,
     binaryDir: string,
     options: Scheme2BenchmarkRunnerOptions,
   ) {
+    this.options = options;
     this.service = new Scheme2QueryService(metaDbPath, binaryDir, {
       verifyChecksums: options.verifyChecksums,
+      prewarmActionSchemas: options.prewarmActionSchemas,
     });
   }
 
@@ -32,6 +36,10 @@ export class Scheme2BenchmarkRunner {
       const depthBb = Number(parts[2].replace("BB", ""));
 
       this.service.prewarmDimension({ strategy, playerCount, depthBb });
+    }
+
+    if (this.options.prewarmActionSchemas) {
+      this.service.prewarmActionSchemas();
     }
   }
 
@@ -60,6 +68,32 @@ export class Scheme2BenchmarkRunner {
     return strategy?.actions.length ?? 0;
   }
 
+  /** Sync batch query—requires prewarmed handles (warmup() already called). */
+  getHandStrategiesBatchSync(item: BatchBenchmarkItem): number {
+    const results = this.service.getHandStrategiesBatchSync({
+      strategy: item.strategy,
+      playerCount: item.playerCount,
+      depthBb: item.depthBb,
+      requests: item.requests,
+    });
+
+    let total = 0;
+    for (const result of results) {
+      total += result.strategy?.actions.length ?? 0;
+    }
+    return total;
+  }
+
+  /** Lightweight sync batch: returns total action count via Rust queryBatchCount, skipping JS assembly. */
+  getHandStrategiesCountBatchSync(item: BatchBenchmarkItem): number {
+    return this.service.getHandStrategiesCountBatchSync({
+      strategy: item.strategy,
+      playerCount: item.playerCount,
+      depthBb: item.depthBb,
+      requests: item.requests,
+    });
+  }
+
   async getHandStrategiesBatch(item: BatchBenchmarkItem): Promise<number> {
     const results = await this.service.getHandStrategiesBatch({
       strategy: item.strategy,
@@ -68,7 +102,11 @@ export class Scheme2BenchmarkRunner {
       requests: item.requests,
     });
 
-    return results.reduce((total, result) => total + (result.strategy?.actions.length ?? 0), 0);
+    let total = 0;
+    for (const result of results) {
+      total += result.strategy?.actions.length ?? 0;
+    }
+    return total;
   }
 
   async close(): Promise<void> {

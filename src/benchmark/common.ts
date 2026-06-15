@@ -11,6 +11,8 @@ export interface RequestedDimension {
   depthBb: number;
 }
 
+export type WorkloadMode = "random" | "abstract-local";
+
 export interface HandBenchmarkItem {
   strategy: string;
   playerCount: number;
@@ -31,6 +33,7 @@ export interface BatchBenchmarkItem {
 
 export interface BenchmarkWorkload {
   seed: number;
+  mode: WorkloadMode;
   dimensions: string[];
   handQueries: HandBenchmarkItem[];
   batchQueries: BatchBenchmarkItem[];
@@ -46,6 +49,7 @@ export interface WorkloadOptions {
   batchIterations: number;
   batchSize: number;
   batchSizes: number[];
+  workloadMode?: WorkloadMode;
 }
 
 export interface MemorySnapshot {
@@ -98,6 +102,8 @@ export interface BenchmarkRunReport {
     verifyChecksums?: boolean;
     packCacheSize?: number;
     verifyResults?: boolean;
+    prewarmActionSchemas?: boolean;
+    workloadMode?: WorkloadMode;
   };
   workload: {
     dimensions: string[];
@@ -130,6 +136,9 @@ interface SamplingStats {
   rowCount: number;
   minId: number;
   maxId: number;
+  concreteRowCount: number;
+  concreteMinId: number;
+  concreteMaxId: number;
 }
 
 interface QueryLike {
@@ -146,6 +155,7 @@ export function createBenchmarkWorkload(options: WorkloadOptions): BenchmarkWork
   const db = new Database(options.sourceDbPath, { readonly: true });
 
   try {
+    const workloadMode = options.workloadMode ?? "random";
     const dimensions = filterDimensions(discoverRangeDimensions(db), options.requestedDimensions);
     if (dimensions.length === 0) {
       throw new Error("No range dimensions matched the requested benchmark filters.");
@@ -166,13 +176,22 @@ export function createBenchmarkWorkload(options: WorkloadOptions): BenchmarkWork
     const batchQueriesBySize = new Map<number, BatchBenchmarkItem[]>();
 
     for (const size of batchSizes) {
-      batchQueriesBySize.set(size, sampler.sampleBatchQueries(options.batchIterations, size));
+      batchQueriesBySize.set(
+        size,
+        workloadMode === "abstract-local"
+          ? sampler.sampleAbstractLocalBatchQueries(options.batchIterations, size)
+          : sampler.sampleBatchQueries(options.batchIterations, size),
+      );
     }
 
     return {
       seed: options.seed,
+      mode: workloadMode,
       dimensions: stats.map((item) => dimensionKey(item.dimension)),
-      handQueries: sampler.sampleHandQueries(options.handIterations),
+      handQueries:
+        workloadMode === "abstract-local"
+          ? sampler.sampleAbstractLocalHandQueries(options.handIterations)
+          : sampler.sampleHandQueries(options.handIterations),
       batchQueries: batchQueriesBySize.get(options.batchSize) ?? batchQueriesBySize.get(batchSizes[0]) ?? [],
       batchSize: options.batchSize,
       batchQueriesBySize,
@@ -270,6 +289,7 @@ export async function writeWorkloadJson(path: string, workload: BenchmarkWorkloa
     `${JSON.stringify(
       {
         seed: workload.seed,
+        mode: workload.mode,
         dimensions: workload.dimensions,
         handQueries: workload.handQueries,
         batchQueries: workload.batchQueries,
@@ -304,6 +324,7 @@ export async function readWorkloadJson(path: string): Promise<BenchmarkWorkload>
 
   return {
     seed: raw.seed,
+    mode: raw.mode ?? "random",
     dimensions: raw.dimensions ?? [],
     handQueries: raw.handQueries ?? [],
     batchQueries: raw.batchQueries ?? defaultBatchQueries,
@@ -365,6 +386,7 @@ ${coldStart}
 ## Workload
 
 - workload 来源：${report.workloadSource}${report.workloadPath ? ` (\`${report.workloadPath}\`)` : ""}
+- workload mode：${report.options.workloadMode ?? "random"}
 - 单手牌查询：${formatNumber(report.workload.handQueries)}
 - 批量查询：${formatNumber(report.workload.batchQueries)}
 - batch size：${formatNumber(report.workload.batchSize)}
@@ -385,6 +407,11 @@ ${markdownTable(["case", "iters", "avg", "p50", "p95", "p99", "max", "qps", "err
 
 ${report.notes.map((note) => `- ${note}`).join("\n")}
 `;
+}
+
+export function parseWorkloadMode(value: string): WorkloadMode {
+  if (value === "random" || value === "abstract-local") return value;
+  throw new Error(`Invalid --workload-mode value: ${value}. Use random or abstract-local.`);
 }
 
 export function parseRequestedDimension(value: string): RequestedDimension {
@@ -435,18 +462,30 @@ function getSamplingStats(db: Database, dimension: RangeDimension): SamplingStat
       FROM ${quoteIdentifier(dimension.rangeTable)}
     `)
     .get() as { minId: number | null; maxId: number | null; rowCount: number };
+  const concreteRow = db
+    .query(`
+      SELECT MIN(id) AS minId, MAX(id) AS maxId, COUNT(*) AS rowCount
+      FROM ${quoteIdentifier(dimension.concreteTable)}
+    `)
+    .get() as { minId: number | null; maxId: number | null; rowCount: number };
 
   return {
     dimension,
     rowCount: row.rowCount,
     minId: row.minId ?? 0,
     maxId: row.maxId ?? 0,
+    concreteRowCount: concreteRow.rowCount,
+    concreteMinId: concreteRow.minId ?? 0,
+    concreteMaxId: concreteRow.maxId ?? 0,
   };
 }
 
 class WorkloadSampler {
   private readonly totalRows: number;
   private readonly sampleStatements = new Map<string, { nextById: QueryLike; first: QueryLike }>();
+  private readonly abstractLineStatements = new Map<string, { nextById: QueryLike; first: QueryLike }>();
+  private readonly concreteIdsByAbstractStatements = new Map<string, QueryLike>();
+  private readonly handByConcreteStatements = new Map<string, QueryLike>();
   private readonly strataCount = 5;
   private readonly strataIndices = new Map<string, number>();
 
@@ -519,6 +558,49 @@ class WorkloadSampler {
     return result;
   }
 
+  sampleAbstractLocalHandQueries(count: number): HandBenchmarkItem[] {
+    const result: HandBenchmarkItem[] = [];
+    for (let index = 0; index < count; index++) {
+      result.push(this.sampleAbstractLocalHandQuery());
+    }
+    return result;
+  }
+
+  sampleAbstractLocalBatchQueries(count: number, batchSize: number): BatchBenchmarkItem[] {
+    const result: BatchBenchmarkItem[] = [];
+    const safeBatchSize = Math.max(1, batchSize);
+
+    for (let index = 0; index < count; index++) {
+      const stats = this.pickStats();
+      const concreteIds = this.sampleConcreteIdsForAbstract(stats);
+
+      if (concreteIds.length === 0) {
+        result.push(this.sampleBatchQueries(1, safeBatchSize)[0]);
+        continue;
+      }
+
+      const start = this.random.nextInt(concreteIds.length);
+      const requests: BatchBenchmarkItem["requests"] = [];
+      for (let requestIndex = 0; requestIndex < safeBatchSize; requestIndex++) {
+        const concreteLineId = concreteIds[(start + requestIndex) % concreteIds.length];
+        const row = this.sampleHandForConcreteLine(stats, concreteLineId);
+        requests.push({
+          concreteLineId: row.concrete_line_id,
+          holeCards: row.hole_cards,
+        });
+      }
+
+      result.push({
+        strategy: stats.dimension.strategy,
+        playerCount: stats.dimension.playerCount,
+        depthBb: stats.dimension.depthBb,
+        requests,
+      });
+    }
+
+    return result;
+  }
+
   private sampleStratifiedHandQuery(): HandBenchmarkItem {
     const stats = this.pickStats();
     const dimKey = dimensionKey(stats.dimension);
@@ -545,6 +627,23 @@ class WorkloadSampler {
   private sampleHandQuery(forcedStats?: SamplingStats): HandBenchmarkItem {
     const stats = forcedStats ?? this.pickStats();
     const row = this.sampleRangeRow(stats);
+
+    return {
+      strategy: stats.dimension.strategy,
+      playerCount: stats.dimension.playerCount,
+      depthBb: stats.dimension.depthBb,
+      concreteLineId: row.concrete_line_id,
+      holeCards: row.hole_cards,
+    };
+  }
+
+  private sampleAbstractLocalHandQuery(): HandBenchmarkItem {
+    const stats = this.pickStats();
+    const concreteIds = this.sampleConcreteIdsForAbstract(stats);
+    if (concreteIds.length === 0) return this.sampleHandQuery(stats);
+
+    const concreteLineId = this.random.pick(concreteIds);
+    const row = this.sampleHandForConcreteLine(stats, concreteLineId);
 
     return {
       strategy: stats.dimension.strategy,
@@ -601,6 +700,80 @@ class WorkloadSampler {
     };
     this.sampleStatements.set(rangeTable, statements);
     return statements;
+  }
+
+  private sampleConcreteIdsForAbstract(stats: SamplingStats): number[] {
+    const abstractLine = this.sampleAbstractLine(stats);
+    const statement = this.getConcreteIdsByAbstractStatement(stats.dimension.concreteTable);
+    return statement.all(abstractLine).map((row) => (row as { id: number }).id);
+  }
+
+  private sampleAbstractLine(stats: SamplingStats): string {
+    const statements = this.getAbstractLineStatements(stats.dimension.concreteTable);
+    const randomId = stats.concreteMinId + this.random.nextInt(Math.max(1, stats.concreteMaxId - stats.concreteMinId + 1));
+    const row = statements.nextById.get(randomId) ?? statements.first.get();
+    if (!row) {
+      throw new Error(`Could not sample abstract line from ${stats.dimension.concreteTable}`);
+    }
+    return (row as { abstract_line: string }).abstract_line;
+  }
+
+  private sampleHandForConcreteLine(stats: SamplingStats, concreteLineId: number): SampledRangeRow {
+    const statement = this.getHandByConcreteStatement(stats.dimension.rangeTable);
+    const row = statement.get(concreteLineId) ?? this.sampleRangeRow(stats);
+    return row as SampledRangeRow;
+  }
+
+  private getAbstractLineStatements(concreteTable: string): { nextById: QueryLike; first: QueryLike } {
+    const cached = this.abstractLineStatements.get(concreteTable);
+    if (cached) return cached;
+
+    const statements = {
+      nextById: this.db.query(`
+        SELECT abstract_line
+        FROM ${quoteIdentifier(concreteTable)}
+        WHERE id >= ?
+        ORDER BY id
+        LIMIT 1
+      `) as QueryLike,
+      first: this.db.query(`
+        SELECT abstract_line
+        FROM ${quoteIdentifier(concreteTable)}
+        ORDER BY id
+        LIMIT 1
+      `) as QueryLike,
+    };
+    this.abstractLineStatements.set(concreteTable, statements);
+    return statements;
+  }
+
+  private getConcreteIdsByAbstractStatement(concreteTable: string): QueryLike {
+    const cached = this.concreteIdsByAbstractStatements.get(concreteTable);
+    if (cached) return cached;
+
+    const statement = this.db.query(`
+      SELECT id
+      FROM ${quoteIdentifier(concreteTable)}
+      WHERE abstract_line = ?
+      ORDER BY id
+    `) as QueryLike;
+    this.concreteIdsByAbstractStatements.set(concreteTable, statement);
+    return statement;
+  }
+
+  private getHandByConcreteStatement(rangeTable: string): QueryLike {
+    const cached = this.handByConcreteStatements.get(rangeTable);
+    if (cached) return cached;
+
+    const statement = this.db.query(`
+      SELECT concrete_line_id, hole_cards
+      FROM ${quoteIdentifier(rangeTable)}
+      WHERE concrete_line_id = ?
+      ORDER BY id
+      LIMIT 1
+    `) as QueryLike;
+    this.handByConcreteStatements.set(rangeTable, statement);
+    return statement;
   }
 
 }
