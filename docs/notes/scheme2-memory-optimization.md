@@ -1,5 +1,7 @@
 # 方案二内存优化：全量 mmap → 按需 fs.readSync
 
+> **历史文档**：本文档记录了 JS 版方案二的内存优化历程。当前 Rust 版使用 LRU Handle 池管理 mmap，详见 `docs/requirements-status-and-plan.md` 第 12 节。
+>
 > 归档时间：2026-06-13
 > 关联问题：P0-1「二进制查询性能严重劣于 SQLite」— 内存优化
 > 优化项：P1 按需文件读取、P2 移除 concrete_lines 表、P3 并行预热

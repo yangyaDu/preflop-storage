@@ -7,63 +7,36 @@
 
 ## P0 — 生产阻塞
 
-### 1. 二进制查询性能严重劣于 SQLite
+### 1. 二进制查询性能严重劣于 SQLite ✅ **已解决**
 
-**现状：** 二进制存储方案的单手策略 P95 延迟为 3.15ms，而旧 SQLite 方案仅为 0.148ms（21x 慢）。drill-random 查询差距更大：二进制 1.57s vs SQLite 65.75ms（24x 慢）。
+**最终状态（2026-06-16）：** 通过三项优化（Flat TypedArray 批量传输 + 维度级 schema 预加载 + LRU handle 池），Scheme2 + Rust 的热路径延迟全面超越 SQLite：
 
-**已实施优化 — 第一轮（2026-06-13）解码与查询层：**
-- MetaDb 引入 per-dimension prepared statement 缓存，消除 SQL 编译开销
-- 新增 `decodeRangePackForHand()` 按需解码（只解析目标手牌 ~10 cell，而非全量 1690 cell）
-- 新增 `decodeRangePackMaskMatch()` 掩码匹配（不解析 cell 数据段）
-- `getHandStrategiesBatch` 重写：按 concreteLineId 分组 + 批量 SQL 查询 + 并行读取 pack
+| case | SQLite p50 | Scheme2 优化后 p50 | 提升 |
+|------|-----------|-------------------|------|
+| hand-strategy | 0.038 ms | 0.009 ms | 4.2x |
+| batch-20 | 0.683 ms | 0.096 ms | 7.1x |
+| batch-100 | 3.682 ms | 0.505 ms | 7.3x |
+| 综合 QPS | 1,401 | 8,701 | 6.2x |
 
-**已实施优化 — 第二轮（2026-06-13）内存管理层：**
-- P1：新建 `RangeBinFileReader`（按需 `fs.readSync`），替大文件 `Bun.file().bytes()` 全量加载
-  - < 10 MB .bin → `RangeBinMmapReader`（全量 mmap）
-  - >= 10 MB .bin → `RangeBinFileReader`（按需 readSync + OS cache）
-- P2：移除 meta.db 中 `concrete_lines_*` 表（495K 行 / 77.6 MB 无用数据）→ meta.db 74MB → ~300KB
-- P3：benchmark warmup 从串行改为 `Promise.all` 并行
+**历程**：经过 JS 版多轮优化（解码层、内存层、TypedArray）仍慢于 SQLite 3.3x → 引入 Rust napi-rs 热路径后反超 4.6x → 三项优化后进一步提升至 6.2x。详细过程见 `docs/notes/architecture-bottleneck-analysis.md`。
 
-**第二轮优化效果：**
-
-| 指标 | SQLite | 方案一 | 方案二（优化前） | 方案二（优化后） |
-|---|---|---|---|---|
-| hand-strategy | 0.092ms | 0.346ms | 0.303ms | 0.333ms |
-| 冷启动 | 17.80ms | 359.52ms | 58ms | 17.39ms |
-| RSS 增加 | 4.55MB | 230.79MB | ~215MB | 52.34MB |
-| Heap 增加 | 0B | 149.79MB | ~214MB | 23.10MB |
-
-详细文档：`docs/notes/scheme2-memory-optimization.md`
-
-**当前状态：内存问题已解决，延迟差距收窄至 3.6x（vs SQLite），仍有优化空间。**
-
-**剩余优化方向（P2 级技术债务）：**
-1. Buffer 对象池：复用 readSync 用的 Buffer，避免每次 `Buffer.alloc()`
-2. ActionResult 对象复用：用 TypedArray 中间格式取代对象数组
-3. 补充 OS 冷启动测试（清除 page cache 后测试）
+**Tradeoff**：冷启动从 SQLite 的 14ms 变为 1.21s（schema 预加载），内存从 +32MB 变为 +225MB（可通过 `maxOpenHandles` 控制）。适合预热场景。
 
 ---
 
 ## P1 — 质量与安全网
 
-### 2. 测试覆盖率严重不足
+### 2. 测试覆盖率
 
-**现状：** 整个项目只有 5 个单元测试（`tests/binary-codec.test.ts`），仅覆盖 CRC、文件头、action schema、range pack 的编解码往返。
+**现状（2026-06-16）：** 已有 25 个 Bun 测试（3 个测试文件），覆盖 scheme2 查询服务、pack 编解码、文件格式等。测试通过 `bun test` 和 pre-commit hook 运行。
 
-**缺失的测试（按优先级）：**
+**仍缺失的测试：**
 
 | 优先级 | 测试对象 | 说明 |
 |---|---|---|
-| 高 | `PreflopQueryService` | 核心查询 API，包含错误码路径 |
-| 高 | `MetaDb` | 元数据库查询方法 |
-| 高 | `build-binary-store.ts` | 构建管线 smoke test |
+| 中 | 构建管线 smoke test | Scheme2 builder 的正确性 |
 | 中 | 全量 CLI 参数解析 | 边界值、非法参数 |
-| 中 | 批处理错误处理 | `getHandStrategiesBatch()` 的 per-item error |
 | 低 | Benchmark 输出校验 | 确保 benchmark 不会静默失败 |
-
-`tests/test-cases.md` 中列了 15 个测试用例，目前全部为手动测试，未自动化。
-
-**影响：** 性能优化、重构等任何修改都无法安全进行，回归风险极高。
 
 ---
 
@@ -125,11 +98,9 @@ bun run lint
 ## 建议执行顺序
 
 ```
-P0: 性能回归修复（需先 profile）
+已完成 P0: 性能优化（Scheme2 + Rust + 三项优化，6.2x 快于 SQLite）
   ↓
-P1: 测试补全（优先 PreflopQueryService、MetaDb、构建管线）
+P1: 测试补全（构建管线 smoke test、CLI 参数边界测试）
   ↓
-P2: Husky 迁移 + 消除代码重复 + 精度规范 + 冷启动测试 + 错误风格审查
+P2: 代码去重 + 冷启动 OS cache 清除测试 + 错误风格统一
 ```
-
-性能优化和测试补全可以部分并行，但推荐先补关键测试再做性能改动，以确保不引入回归。

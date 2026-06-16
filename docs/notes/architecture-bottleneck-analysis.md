@@ -1,5 +1,8 @@
 # 架构瓶颈分析与方案选择记录
 
+> **历史文档**：本文档记录了 2026-06-13 从方案一到方案二的架构迁移决策。
+> 当前最新性能数据见 `docs/requirements-status-and-plan.md` 第 12 节。
+>
 > 归档时间：2026-06-13
 > 决策：从方案一（SQLite meta.db + fs 读 .bin）迁移到方案二（mmap .idx + mmap .bin）
 
