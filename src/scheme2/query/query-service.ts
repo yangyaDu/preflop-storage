@@ -18,6 +18,10 @@ import { RangeIdxReader } from "../idx/idx-reader";
 // Rust native addon — replaces RangeIdxReader + RangeBinReader for the hot path.
 import { DimensionHandle, type BatchQueryRequest, type PackDecodeResult } from "../../../native-addon/index.js";
 
+// Flat buffer protocol constants for query_batch_flat
+const FLAT_MAGIC = 0x46425146; // "FQBF"
+const FLAT_CELL_SIZE = 21;
+
 export interface ActionResult {
   actionName: ActionName;
   actionSize: number;
@@ -59,12 +63,16 @@ export interface ActionSchemaRow {
 export interface Scheme2QueryServiceOptions {
   verifyChecksums?: boolean;
   prewarmActionSchemas?: boolean;
+  /** Maximum number of concurrently open DimensionHandle mmaps. Default 3. */
+  maxOpenHandles?: number;
 }
 
 export class Scheme2QueryService {
   private readonly metaDb: Database;
   private readonly handles = new Map<string, DimensionHandle>();
   private readonly actionCache = new Map<number, ActionDef[]>();
+  private readonly handleLRU: string[] = []; // [oldest, ..., newest]
+  private readonly maxOpenHandles: number;
 
   constructor(
     metaDbPath: string,
@@ -72,6 +80,7 @@ export class Scheme2QueryService {
     private readonly options: Scheme2QueryServiceOptions = {},
   ) {
     this.metaDb = new Database(metaDbPath, { readonly: true });
+    this.maxOpenHandles = this.options.maxOpenHandles ?? 3;
     if (this.options.prewarmActionSchemas) {
       this.prewarmActionSchemas();
     }
@@ -133,7 +142,10 @@ export class Scheme2QueryService {
     const binFileName = getBinFileName(strategy, params.playerCount, params.depthBb);
     const key = `${idxFileName}|${binFileName}`;
 
-    if (this.handles.has(key)) return;
+    if (this.handles.has(key)) {
+      this.touchHandle(key);
+      return;
+    }
 
     const idxPath = join(this.binaryDir, idxFileName);
     const binPath = join(this.binaryDir, binFileName);
@@ -141,6 +153,9 @@ export class Scheme2QueryService {
     try {
       const handle = new DimensionHandle(idxPath, binPath);
       this.handles.set(key, handle);
+      this.touchHandle(key);
+      this.evictLRU();
+      this.prewarmActionSchemasForDimension(handle);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       if (msg.includes("ENOENT") || msg.includes("No such file")) {
@@ -151,6 +166,15 @@ export class Scheme2QueryService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Scan the dimension's .idx records and prewarm only the action schemas
+   * actually referenced. Avoids eager full-schema loading while still keeping
+   * the query hot-path free of meta.db round-trips.
+   */
+  prewarmActionSchemasForDimension(handle: DimensionHandle): number {
+    return this.prewarmActionSchemas(handle.uniqueActionSchemaIds());
   }
 
   /**
@@ -203,6 +227,7 @@ export class Scheme2QueryService {
     const handle = this.handles.get(key);
 
     if (handle) {
+      this.touchHandle(key);
       return this.queryHandSync(params.holeCards, params.concreteLineId, handle);
     }
 
@@ -246,6 +271,7 @@ export class Scheme2QueryService {
       });
     }
 
+    this.touchHandle(key);
     return this.queryHandSync(params.holeCards, params.concreteLineId, handle);
   }
 
@@ -303,6 +329,7 @@ export class Scheme2QueryService {
       });
     }
 
+    this.touchHandle(key);
     return this.batchQuerySync(handle, params.requests);
   }
 
@@ -331,6 +358,7 @@ export class Scheme2QueryService {
       });
     }
 
+    this.touchHandle(key);
     const rustRequests: BatchQueryRequest[] = [];
     for (const req of params.requests) {
       const handId = this.getKnownHandId(req.holeCards);
@@ -506,7 +534,23 @@ export class Scheme2QueryService {
     // Rust Drop handles mmap cleanup automatically when handle is GC'd.
     // Clear the Map to release references.
     this.handles.clear();
+    this.handleLRU.length = 0;
     this.metaDb.close();
+  }
+
+  // ── LRU handle pool ──
+
+  private touchHandle(key: string): void {
+    const idx = this.handleLRU.indexOf(key);
+    if (idx !== -1) this.handleLRU.splice(idx, 1);
+    this.handleLRU.push(key);
+  }
+
+  private evictLRU(): void {
+    while (this.handleLRU.length > this.maxOpenHandles) {
+      const oldest = this.handleLRU.shift()!;
+      this.handles.delete(oldest);
+    }
   }
 
   // ── 内部同步热路径（Rust-backed）──
@@ -530,25 +574,110 @@ export class Scheme2QueryService {
       }
     }
 
-    const rustResults = handle.queryBatch(rustRequests, this.options.verifyChecksums ?? false);
-    const resultByIndex = new Map<number, PackDecodeResult | null>();
+    const flatBuffer = handle.queryBatchFlat(rustRequests, this.options.verifyChecksums ?? false);
+    return this.parseFlatBatchResult(flatBuffer as unknown as Buffer, requests, requestIndexes, invalidHandErrors);
+  }
 
-    for (let i = 0; i < requestIndexes.length; i++) {
-      resultByIndex.set(requestIndexes[i], rustResults[i] ?? null);
+  /**
+   * Parse the flat binary buffer from `query_batch_flat` directly into
+   * `BatchHandStrategyResult[]`, bypassing napi object serialization for
+   * DecodedCellResult objects.
+   */
+  private parseFlatBatchResult(
+    rawBuffer: Buffer | Uint8Array,
+    requests: BatchHandStrategyRequest[],
+    requestIndexes: number[],
+    invalidHandErrors: Map<number, PreflopQueryErrorInfo>,
+  ): BatchHandStrategyResult[] {
+    // napi-rs Vec<u8> returns different types depending on runtime (Node Buffer, Bun Uint8Array, etc.).
+    // Normalize to a Uint8Array so we can reliably access .buffer/.byteOffset/.byteLength.
+    const flat = rawBuffer instanceof Uint8Array ? rawBuffer : new Uint8Array(rawBuffer as Iterable<number>);
+    const view = new DataView(flat.buffer, flat.byteOffset, flat.byteLength);
+    let offset = 0;
+
+    // Header
+    const magic = view.getUint32(offset, true);
+    if (magic !== FLAT_MAGIC) {
+      throw new Error(`Invalid flat buffer magic: 0x${magic.toString(16)}`);
+    }
+    offset += 4;
+    const requestCount = view.getUint32(offset, true);
+    offset += 4;
+    /* hitCount = */ offset += 4;
+
+    // Per-request table
+    const perRequestMeta: { cellCount: number; schemaId: number }[] = [];
+    for (let i = 0; i < requestCount; i++) {
+      const cellCount = view.getUint16(offset, true);
+      offset += 2;
+      /* reserved = */ offset += 2;
+      const schemaId = view.getUint32(offset, true);
+      offset += 4;
+      perRequestMeta.push({ cellCount, schemaId });
     }
 
+    // Pre-warm all needed action schemas in one batch
+    for (const { cellCount, schemaId } of perRequestMeta) {
+      if (cellCount > 0) {
+        this.getActionSchema(schemaId);
+      }
+    }
+
+    // Cell data section — read and assemble strategies in-place
+    const resultByIndex = new Map<number, HandStrategy | null>();
+
+    for (let i = 0; i < requestCount; i++) {
+      const originalIdx = requestIndexes[i];
+      const { cellCount, schemaId } = perRequestMeta[i];
+
+      if (cellCount === 0) {
+        resultByIndex.set(originalIdx, null);
+        continue;
+      }
+
+      const actions = this.actionCache.get(schemaId);
+      if (!actions) {
+        resultByIndex.set(originalIdx, null);
+        offset += cellCount * FLAT_CELL_SIZE;
+        continue;
+      }
+
+      const actionResults: ActionResult[] = [];
+      for (let j = 0; j < cellCount; j++) {
+        const actionId = view.getUint32(offset, true);
+        offset += 4;
+        const frequency = view.getFloat64(offset, true);
+        offset += 8;
+        const evFlag = view.getUint8(offset);
+        offset += 1;
+        const handEvRaw = view.getFloat64(offset, true);
+        offset += 8;
+
+        const action = actions[actionId];
+        if (!action) continue;
+        actionResults.push({
+          actionName: action.actionName,
+          actionSize: action.actionSize,
+          amountBB: action.amountBB,
+          frequency,
+          handEV: evFlag ? handEvRaw : null,
+          exists: true,
+        });
+      }
+
+      const holeCards = requests[originalIdx].holeCards;
+      resultByIndex.set(originalIdx, { holeCards, exists: true, actions: actionResults });
+    }
+
+    // Assemble final results
     return requests.map((request, i) => {
       const invalidHandError = invalidHandErrors.get(i);
       if (invalidHandError) {
-        return {
-          ...request,
-          strategy: null,
-          error: invalidHandError,
-        };
+        return { ...request, strategy: null, error: invalidHandError };
       }
 
-      const fragment = resultByIndex.get(i);
-      if (!fragment) {
+      const strategy = resultByIndex.get(i);
+      if (!strategy) {
         return {
           ...request,
           strategy: null,
@@ -560,12 +689,7 @@ export class Scheme2QueryService {
         };
       }
 
-      const actions = this.getActionSchema(fragment.actionSchemaId);
-      return {
-        ...request,
-        strategy: this.assembleHandStrategy(request.holeCards, fragment, actions),
-        error: null,
-      };
+      return { ...request, strategy, error: null };
     });
   }
 

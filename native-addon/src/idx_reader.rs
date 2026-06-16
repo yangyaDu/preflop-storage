@@ -4,6 +4,7 @@
 //!   [0..16)   header  (magic PFXI, version, recordCount, headerSize)
 //!   [16..]    records (22 bytes each, sorted by concreteLineId ascending)
 
+use std::collections::HashSet;
 use std::fs::File;
 use std::io;
 use std::path::Path;
@@ -65,6 +66,26 @@ impl IdxReader {
     #[inline]
     pub fn record_count(&self) -> u32 {
         self.record_count
+    }
+
+    /// Scan all .idx records and collect unique `action_schema_id` values.
+    ///
+    /// Used by the TS layer to prewarm only the subset of action schemas
+    /// actually referenced by this dimension, instead of loading all schemas.
+    pub fn unique_action_schema_ids(&self) -> Vec<u32> {
+        let n = self.record_count as usize;
+        if n == 0 {
+            return Vec::new();
+        }
+        let records = &self.mmap[IDX_HEADER_SIZE..];
+        let mut seen = HashSet::with_capacity((n / 16).max(16));
+        for i in 0..n {
+            let off = i * IDX_RECORD_SIZE;
+            seen.insert(u32_from_le(&records[off + 4..off + 8]));
+        }
+        let mut ids: Vec<u32> = seen.into_iter().collect();
+        ids.sort_unstable();
+        ids
     }
 
     /// Binary search for `concrete_line_id`.

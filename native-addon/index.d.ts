@@ -33,9 +33,40 @@ export declare class DimensionHandle {
    */
   queryBatch(requests: Array<BatchQueryRequest>, verifyChecksum?: boolean | undefined | null): Array<PackDecodeResult | undefined | null>
   /**
+   * Return the unique action_schema_id values used by this dimension.
+   *
+   * Enables the TS layer to prewarm only the subset of action schemas
+   * actually referenced, avoiding full-schema eager loading.
+   */
+  uniqueActionSchemaIds(): Array<number>
+  /**
+   * Flat binary batch query — returns a raw Buffer to avoid napi object
+   * serialization overhead for `DecodedCellResult` objects.
+   *
+   * Buffer layout (all little-endian):
+   *   HEADER (12 bytes):
+   *     [0..4)   magic: u32 = 0x46425146 ("FQBF")
+   *     [4..8)   requestCount: u32
+   *     [8..12)  hitCount: u32
+   *   PER-REQUEST TABLE (requestCount × 8 bytes):
+   *     [0..2)   cellCount: u16  (0 = null/miss)
+   *     [2..4)   reserved: u16 = 0
+   *     [4..8)   actionSchemaId: u32
+   *   CELL DATA (totalCellCount × 21 bytes):
+   *     [0..4)   actionId: u32
+   *     [4..12)  frequency: f64
+   *     [12]     evFlag: u8  (1 = valid, 0 = NaN/null)
+   *     [13..21) handEv: f64  (valid when evFlag=1)
+   *
+   * Total size = 12 + requestCount × 8 + totalCellCount × 21.
+   */
+  queryBatchFlat(requests: Array<BatchQueryRequest>, verifyChecksum?: boolean | undefined | null): Array<number>
+  /**
    * Lightweight batch: return only action cell counts per request.
    *
-   * Much faster than `queryBatch` — avoids serializing individual cell objects.
+   * Much faster than `query_batch` because it avoids serializing individual
+   * DecodedCellResult objects across the napi boundary.
+   * Returns `null` for a request if the concreteLineId/handId is not found.
    */
   queryBatchCount(requests: Array<BatchQueryRequest>): Array<number | undefined | null>
 }

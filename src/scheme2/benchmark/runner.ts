@@ -9,6 +9,8 @@ import {
 export interface Scheme2BenchmarkRunnerOptions {
   verifyChecksums: boolean;
   prewarmActionSchemas?: boolean;
+  /** Max concurrently open mmap handles (LRU pool size). Benchmark defaults to a large value. */
+  maxOpenHandles?: number;
 }
 
 export class Scheme2BenchmarkRunner {
@@ -24,6 +26,7 @@ export class Scheme2BenchmarkRunner {
     this.service = new Scheme2QueryService(metaDbPath, binaryDir, {
       verifyChecksums: options.verifyChecksums,
       prewarmActionSchemas: options.prewarmActionSchemas,
+      maxOpenHandles: options.maxOpenHandles ?? 100,
     });
   }
 
