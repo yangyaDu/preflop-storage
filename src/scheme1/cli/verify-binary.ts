@@ -16,14 +16,10 @@ import {
 import { getHandId } from "../../hand/hand-dict";
 import { discoverRangeDimensions, type OldRangeRow } from "../../importer/old-sqlite";
 import { getNumberArg, getRepeatedStringArgs, getStringArg, parseCliArgs } from "../../cli/args";
+import { filterDimensions, parseDimension, type DimensionSpec } from "../../utils/dimension";
+import { sum } from "../../utils/math";
 
 type VerifyMode = "sample" | "full";
-
-interface RequestedDimension {
-  strategy: string;
-  playerCount: number;
-  depthBb: number;
-}
 
 interface VerifyOptions {
   sourceDbPath: string;
@@ -32,7 +28,7 @@ interface VerifyOptions {
   mode: VerifyMode;
   sampleSize: number;
   maxFailures: number;
-  dimensions: RequestedDimension[];
+  dimensions: DimensionSpec[];
 }
 
 interface DecodedPackContext {
@@ -603,19 +599,6 @@ function groupRowsByConcreteLine(rows: OldRangeRow[]): Map<number, OldRangeRow[]
   return result;
 }
 
-function filterDimensions(discovered: RangeDimension[], requested: RequestedDimension[]): RangeDimension[] {
-  if (requested.length === 0) return discovered;
-
-  return discovered.filter((dimension) =>
-    requested.some(
-      (item) =>
-        item.strategy === dimension.strategy &&
-        item.playerCount === dimension.playerCount &&
-        item.depthBb === dimension.depthBb,
-    ),
-  );
-}
-
 function createDimensionStats(dimension: RangeDimension): DimensionVerifyStats {
   return {
     dimension: dimensionKey(dimension),
@@ -756,30 +739,4 @@ ${report.repairSuggestions.map((suggestion) => `- ${suggestion}`).join("\n")}
 function parseMode(value: string): VerifyMode {
   if (value === "sample" || value === "full") return value;
   throw new Error(`Invalid --mode value: ${value}. Use sample or full.`);
-}
-
-function parseDimension(value: string): RequestedDimension {
-  const tableLike = value.match(/^(.+)_([0-9]+)max_([0-9]+)BB$/);
-  if (tableLike) {
-    return {
-      strategy: tableLike[1],
-      playerCount: Number(tableLike[2]),
-      depthBb: Number(tableLike[3]),
-    };
-  }
-
-  const colonLike = value.match(/^(.+):([0-9]+)(?:max)?:([0-9]+)(?:BB)?$/);
-  if (colonLike) {
-    return {
-      strategy: colonLike[1],
-      playerCount: Number(colonLike[2]),
-      depthBb: Number(colonLike[3]),
-    };
-  }
-
-  throw new Error(`Invalid --dimension value: ${value}. Use default:6:100 or default_6max_100BB.`);
-}
-
-function sum(values: number[]): number {
-  return values.reduce((total, value) => total + value, 0);
 }

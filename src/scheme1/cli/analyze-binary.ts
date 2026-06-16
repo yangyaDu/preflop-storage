@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { formatBytes, formatNumber, formatPercent, markdownTable, safeRatio } from "../../analysis/format";
 import { quoteIdentifier, getBinFileName } from "../../db/naming";
 import { parseCliArgs, getStringArg } from "../../cli/args";
+import { sum } from "../../utils/math";
 
 interface BinaryFileInfo {
   name: string;
@@ -410,9 +411,4 @@ ${markdownTable(
 ${report.notes.map((note) => `- ${note}`).join("\n")}
 `;
 }
-
-function sum(values: number[]): number {
-  return values.reduce((total, value) => total + value, 0);
-}
-
 

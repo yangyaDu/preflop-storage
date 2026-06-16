@@ -4,6 +4,7 @@ import { mkdir, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import { formatBytes, formatNumber, markdownTable, safeRatio } from "../../analysis/format";
 import { parseCliArgs, getStringArg } from "../../cli/args";
+import { sum } from "../../utils/math";
 import { parseRangeDataTableName, quoteIdentifier } from "../../db/naming";
 
 interface FileSizeInfo {
@@ -542,6 +543,3 @@ ${report.notes.map((note) => `- ${note}`).join("\n")}
 `;
 }
 
-function sum(values: number[]): number {
-  return values.reduce((total, value) => total + value, 0);
-}

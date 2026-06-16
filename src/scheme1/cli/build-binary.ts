@@ -1,5 +1,6 @@
 import { buildBinaryStore } from "../importer/build-binary-store";
 import { parseCliArgs, getBooleanArg, getNumberArg, getRepeatedStringArgs, getStringArg } from "../../cli/args";
+import { parseDimension } from "../../utils/dimension";
 
 const args = parseCliArgs(Bun.argv.slice(2));
 
@@ -26,25 +27,3 @@ await buildBinaryStore({
 });
 
 console.log("binary build completed");
-
-function parseDimension(value: string): { strategy: string; playerCount: number; depthBb: number } {
-  const tableLike = value.match(/^(.+)_([0-9]+)max_([0-9]+)BB$/);
-  if (tableLike) {
-    return {
-      strategy: tableLike[1],
-      playerCount: Number(tableLike[2]),
-      depthBb: Number(tableLike[3]),
-    };
-  }
-
-  const colonLike = value.match(/^(.+):([0-9]+)(?:max)?:([0-9]+)(?:BB)?$/);
-  if (colonLike) {
-    return {
-      strategy: colonLike[1],
-      playerCount: Number(colonLike[2]),
-      depthBb: Number(colonLike[3]),
-    };
-  }
-
-  throw new Error(`Invalid --dimension value: ${value}. Use default:6:100 or default_6max_100BB.`);
-}

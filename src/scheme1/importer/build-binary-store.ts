@@ -15,6 +15,7 @@ import {
 import { initBinaryMetaDb } from "../db/schema";
 import { discoverRangeDimensions, type OldRangeRow } from "../../importer/old-sqlite";
 import { encodeConcreteLinePack, toHex } from "../../importer/encode-pack";
+import { filterDimensions } from "../../utils/dimension";
 
 export interface BuildBinaryStoreOptions {
   sourceDbPath: string;
@@ -92,22 +93,6 @@ export async function buildBinaryStore(options: BuildBinaryStoreOptions): Promis
     metaDb.close();
     sourceDb.close();
   }
-}
-
-function filterDimensions(
-  discovered: RangeDimension[],
-  requested: BuildBinaryStoreOptions["dimensions"],
-): RangeDimension[] {
-  if (!requested || requested.length === 0) return discovered;
-
-  return discovered.filter((dimension) =>
-    requested.some(
-      (item) =>
-        item.strategy === dimension.strategy &&
-        item.playerCount === dimension.playerCount &&
-        item.depthBb === dimension.depthBb,
-    ),
-  );
 }
 
 function uniqueStrategies(dimensions: RangeDimension[]): string[] {

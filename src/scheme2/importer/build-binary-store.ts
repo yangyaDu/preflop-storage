@@ -13,6 +13,7 @@ import {
 } from "../../db/naming";
 import { discoverRangeDimensions, type OldRangeRow } from "../../importer/old-sqlite";
 import { encodeConcreteLinePack, toHex } from "../../importer/encode-pack";
+import { filterDimensions } from "../../utils/dimension";
 import { getIdxFileName } from "../db/naming";
 import { initLightMetaDb } from "../db/schema";
 import { RangeIdxWriter } from "../idx/idx-writer";
@@ -92,22 +93,6 @@ export async function buildBinaryStoreScheme2(options: BuildBinaryStoreSchema2Op
     metaDb.close();
     sourceDb.close();
   }
-}
-
-function filterDimensions(
-  discovered: RangeDimension[],
-  requested: BuildBinaryStoreSchema2Options["dimensions"],
-): RangeDimension[] {
-  if (!requested || requested.length === 0) return discovered;
-
-  return discovered.filter((dimension) =>
-    requested.some(
-      (item) =>
-        item.strategy === dimension.strategy &&
-        item.playerCount === dimension.playerCount &&
-        item.depthBb === dimension.depthBb,
-    ),
-  );
 }
 
 function uniqueStrategies(dimensions: RangeDimension[]): string[] {

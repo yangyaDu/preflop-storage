@@ -28,47 +28,37 @@
 
 ### 2. 测试覆盖率
 
-**现状（2026-06-16）：** 已有 25 个 Bun 测试（3 个测试文件），覆盖 scheme2 查询服务、pack 编解码、文件格式等。测试通过 `bun test` 和 pre-commit hook 运行。
+**现状（2026-06-16）：** 已有 75 个 Bun 测试（4 个测试文件），覆盖 scheme2 查询服务、pack 编解码、文件格式、CLI 参数解析边界值等。测试通过 `bun test` 和 pre-commit hook 运行。
 
 **仍缺失的测试：**
 
 | 优先级 | 测试对象 | 说明 |
 |---|---|---|
 | 中 | 构建管线 smoke test | Scheme2 builder 的正确性 |
-| 中 | 全量 CLI 参数解析 | 边界值、非法参数 |
 | 低 | Benchmark 输出校验 | 确保 benchmark 不会静默失败 |
+
+**已补充：**
+- ✅ CLI 参数解析边界测试（`tests/cli-args.test.ts`，50 个用例，覆盖 parseCliArgs/getStringArg/getNumberArg/getBooleanArg/getNumberListArg/getRepeatedStringArgs）
 
 ---
 
 ## P2 — 维护性与技术债务
 
-### 3. Husky v10 兼容性
+### 3. Husky v10 兼容性 ✅ **已解决**
 
-**现状：** `.husky/_/husky.sh` 中的当前 deprecation 模式**将在 husky v10.0.0 中彻底失效**，届时 pre-commit hook 直接报错，阻断所有提交。
+**最终状态（2026-06-16）：** 已通过 `npx husky init` 重新初始化 hook 内部脚手架，pre-commit 为 v9/v10 兼容格式（直接 shell 命令，不 sourcing husky.sh）。`_/husky.sh` 废弃 shim 仅对旧格式 hook 触发，不影响当前项目。
 
-**修复方式：** 按 husky v10 新范式重新初始化 hook（`npx husky init`）。
+### 4. 代码重复 ✅ **已解决**
 
-**当前 pre-commit hook 内容：**
-```
-#!/usr/bin/env sh
-. "$(dirname -- "$0")/_/husky.sh"
-bun run typecheck
-bun run lint
-```
+**最终状态（2026-06-16）：**
 
-注意：当前 hook 不运行测试（只运行 typecheck + lint），`bun run check` 命令则在 CI/手动运行时执行完整的三项（typecheck + lint + test）。
+| 函数 | 原出现次数 | 新位置 | 说明 |
+|---|---|---|---|
+| `sum(values: number[])` | 4 | `src/utils/math.ts` | 标准 reduce 求和 |
+| `filterDimensions()` | 3（实为 4，含 scheme2） | `src/utils/dimension.ts` | 统一为 `DimensionSpec[] \| null \| undefined` 签名 |
+| `parseDimension()` | 2（实为 3，含 scheme2） | `src/utils/dimension.ts` | 返回 `DimensionSpec` 类型 |
 
-### 4. 代码重复
-
-以下函数在多文件中原样拷贝，无共享模块：
-
-| 函数 | 出现位置 | 次数 |
-|---|---|---|
-| `sum(values: number[])` | `benchmark/common.ts`、`cli/analyze-sqlite.ts`、`cli/analyze-binary.ts`、`cli/verify-binary.ts` | 4 |
-| `filterDimensions()` | `benchmark/common.ts`、`importer/build-binary-store.ts`、`cli/verify-binary.ts` | 3 |
-| `parseDimension()` | `cli/build-binary.ts`、`cli/verify-binary.ts` | 2 |
-
-**建议：** 提取到 `src/utils/stats.ts` 和 `src/utils/dimension.ts`，消除维护不一致的风险。
+所有 9 个原文件中的本地定义已移除，改为从 `src/utils/` 导入。
 
 ### 5. Float32 精度差异
 
@@ -100,7 +90,7 @@ bun run lint
 ```
 已完成 P0: 性能优化（Scheme2 + Rust + 三项优化，6.2x 快于 SQLite）
   ↓
-P1: 测试补全（构建管线 smoke test、CLI 参数边界测试）
+已完成 P1: CLI 参数边界测试 + 代码去重 + Husky v10 兼容性
   ↓
-P2: 代码去重 + 冷启动 OS cache 清除测试 + 错误风格统一
+剩余 P2: 构建管线 smoke test + Float32 精度文档 + OS 冷启动 benchmark + 错误风格统一
 ```

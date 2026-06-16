@@ -211,6 +211,9 @@ src/cli/query-hand.ts
 - action schema round trip 测试。
 - range pack sparse / nullable EV 测试。
 - 旧 SQLite 行式数据编码成 concrete-line pack 测试。
+- scheme2 idx 编解码与二分查找测试。
+- scheme2 查询服务端到端测试。
+- CLI 参数解析边界值测试（50 个用例，覆盖全部 6 个函数）。
 
 测试命令：
 
@@ -221,14 +224,16 @@ bun test
 当前已通过：
 
 ```text
-5 tests passed
+75 tests passed（4 个测试文件）
 ```
 
 对应文件：
 
 ```text
-tests/binary-codec.test.ts
-tests/test-cases.md
+tests/binary-codec.test.ts        — CRC32C、header、action schema、range pack 编解码
+tests/scheme2-idx.test.ts         — .idx 格式读写、二分查找
+tests/scheme2-query-service.test.ts — Scheme2QueryService 端到端查询
+tests/cli-args.test.ts            — parseCliArgs/getStringArg/getNumberArg 等边界测试
 ```
 
 ## 3. 需求对照表
@@ -961,6 +966,9 @@ SQLite 原版 (1447 MB, 0.038ms, 1401 QPS)
 ✅ Flat TypedArray 批量传输
 ✅ 维度级 schema 延迟加载
 ✅ LRU handle 池（maxOpenHandles）
+✅ 75 个 Bun 测试通过（4 个测试文件）
+✅ 代码重复消除（sum/filterDimensions/parseDimension 提取至 src/utils/）
+✅ Husky v10 兼容性（pre-commit 为 v9/v10 兼容格式，含 typecheck + lint）
 ⚠️ RSS +225 MB（可通过 maxOpenHandles 控制）
 ⚠️ 冷启动 1.21s（schema 预加载一次性成本）
 ```

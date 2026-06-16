@@ -4,6 +4,8 @@ import { dirname } from "node:path";
 import { formatBytes, formatNumber, markdownTable, safeRatio } from "../analysis/format";
 import { dimensionKey, quoteIdentifier, type RangeDimension } from "../db/naming";
 import { discoverRangeDimensions } from "../importer/old-sqlite";
+import { sum } from "../utils/math";
+import { filterDimensions } from "../utils/dimension";
 
 export interface RequestedDimension {
   strategy: string;
@@ -442,19 +444,6 @@ export function formatMs(value: number): string {
   return `${value.toFixed(value >= 10 ? 2 : 3)} ms`;
 }
 
-function filterDimensions(discovered: RangeDimension[], requested: RequestedDimension[]): RangeDimension[] {
-  if (requested.length === 0) return discovered;
-
-  return discovered.filter((dimension) =>
-    requested.some(
-      (item) =>
-        item.strategy === dimension.strategy &&
-        item.playerCount === dimension.playerCount &&
-        item.depthBb === dimension.depthBb,
-    ),
-  );
-}
-
 function getSamplingStats(db: Database, dimension: RangeDimension): SamplingStats {
   const row = db
     .query(`
@@ -815,9 +804,6 @@ function percentile(sorted: number[], p: number): number {
   return sorted[lower] * (1 - frac) + sorted[upper] * frac;
 }
 
-function sum(values: number[]): number {
-  return values.reduce((total, value) => total + value, 0);
-}
 
 function isPromise(value: unknown): value is Promise<unknown> {
   return typeof value === "object" && value !== null && typeof (value as Promise<unknown>).then === "function";
