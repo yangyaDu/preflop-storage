@@ -46,6 +46,9 @@ native-addon/*.node
 # Claude local settings
 .claude/
 
+# Windows reserved device names (must NOT be committed)
+nul
+
 # Editor and OS files
 .idea/
 .vscode/

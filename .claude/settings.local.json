@@ -26,7 +26,14 @@
       "Bash(__NEW_LINE_344570924aa25c6c__ cd /c/Users/Duyang/Desktop/elysia_project/preflop-storage/native-addon)",
       "Bash(cargo build:*)",
       "Bash(# Check if VS 2022 build tools are accessible export PATH=\"\"$HOME/.cargo/bin:$PATH\"\" # Look for cl.exe and vcvars find \"\"C:/Program Files/Microsoft Visual Studio/2022\"\" -name \"\"cl.exe\"\")",
-      "Bash(npx eslint:*)"
+      "Bash(npx eslint:*)",
+      "Bash(git -C \"C:\\\\Users\\\\Duyang\\\\Desktop\\\\elysia_project\\\\preflop-storage\" log:*)",
+      "Bash(git restore:*)",
+      "Bash(npm ls:*)",
+      "Bash(npx @napi-rs/cli:*)",
+      "Bash(napi build:*)",
+      "Bash(dir:*)",
+      "Bash(git push)"
     ]
   }
 }
