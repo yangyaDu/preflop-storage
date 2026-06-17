@@ -1,3 +1,5 @@
+import { PreflopStoreError } from "../query/errors";
+
 export type ActionName = "fold" | "call" | "check" | "bet" | "raise" | "allin";
 
 export interface ActionDef {
@@ -42,7 +44,7 @@ export function normalizeActionName(value: string): ActionName {
   if (normalized === "bet") return "bet";
   if (normalized === "raise") return "raise";
   if (normalized === "allin") return "allin";
-  throw new Error(`Unknown action name: ${value}`);
+  throw new PreflopStoreError("INVALID_ARGUMENT", `Unknown action name: ${value}`, { value });
 }
 
 /**
@@ -106,7 +108,7 @@ export function encodeActionSchema(actions: ReadonlyArray<Pick<ActionDef, "actio
 export function decodeActionSchema(actionBlob: Uint8Array, actionCount: number): ActionDef[] {
   const expectedLength = actionCount * 9;
   if (actionBlob.byteLength !== expectedLength) {
-    throw new Error(`Invalid action schema length: expected ${expectedLength}, got ${actionBlob.byteLength}`);
+    throw new PreflopStoreError("INVALID_FORMAT", `Invalid action schema length: expected ${expectedLength}, got ${actionBlob.byteLength}`, { expected: expectedLength, got: actionBlob.byteLength });
   }
 
   const view = new DataView(actionBlob.buffer, actionBlob.byteOffset, actionBlob.byteLength);
@@ -124,7 +126,7 @@ export function decodeActionSchema(actionBlob: Uint8Array, actionCount: number):
     cursor += 4;
 
     const actionName = ACTION_NAME_BY_TYPE[type];
-    if (!actionName) throw new Error(`Unknown action type: ${type}`);
+    if (!actionName) throw new PreflopStoreError("INVALID_FORMAT", `Unknown action type: ${type}`, { type });
 
     actions.push({ actionId, actionName, actionSize, amountBB });
   }

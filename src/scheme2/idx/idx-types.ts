@@ -1,3 +1,5 @@
+import { PreflopStoreError } from "../../query/errors";
+
 export const IDX_MAGIC = "PFXI";
 export const IDX_HEADER_SIZE = 16;
 export const IDX_RECORD_SIZE = 22;
@@ -44,7 +46,7 @@ export function encodeIdxHeader(recordCount: number): Uint8Array {
 
 export function decodeIdxHeader(bytes: Uint8Array): IdxHeader {
   if (bytes.byteLength < IDX_HEADER_SIZE) {
-    throw new Error(`Invalid .idx header length: ${bytes.byteLength}`);
+    throw new PreflopStoreError("INVALID_FORMAT", `Invalid .idx header length: ${bytes.byteLength}`, { expected: IDX_HEADER_SIZE, got: bytes.byteLength });
   }
 
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -65,13 +67,13 @@ export function decodeIdxHeader(bytes: Uint8Array): IdxHeader {
 
 export function assertIdxHeader(header: IdxHeader): void {
   if (header.magic !== IDX_MAGIC) {
-    throw new Error(`Invalid .idx magic: ${header.magic}, expected ${IDX_MAGIC}`);
+    throw new PreflopStoreError("INVALID_FORMAT", `Invalid .idx magic: ${header.magic}, expected ${IDX_MAGIC}`, { expected: IDX_MAGIC, got: header.magic });
   }
   if (header.version !== 1) {
-    throw new Error(`Unsupported .idx version: ${header.version}`);
+    throw new PreflopStoreError("UNSUPPORTED_DATA_VERSION", `Unsupported .idx version: ${header.version}`, { expected: 1, got: header.version });
   }
   if (header.headerSize !== IDX_HEADER_SIZE) {
-    throw new Error(`Unsupported .idx header size: ${header.headerSize}`);
+    throw new PreflopStoreError("INVALID_FORMAT", `Unsupported .idx header size: ${header.headerSize}`, { expected: IDX_HEADER_SIZE, got: header.headerSize });
   }
 }
 
@@ -91,7 +93,7 @@ export function encodeIdxRecord(record: IdxRecord): Uint8Array {
 
 export function decodeIdxRecord(bytes: Uint8Array): IdxRecord {
   if (bytes.byteLength < IDX_RECORD_SIZE) {
-    throw new Error(`Invalid .idx record length: ${bytes.byteLength}, expected ${IDX_RECORD_SIZE}`);
+    throw new PreflopStoreError("INVALID_FORMAT", `Invalid .idx record length: ${bytes.byteLength}, expected ${IDX_RECORD_SIZE}`, { expected: IDX_RECORD_SIZE, got: bytes.byteLength });
   }
 
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);

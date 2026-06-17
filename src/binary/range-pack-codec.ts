@@ -1,3 +1,5 @@
+import { PreflopStoreError } from "../query/errors";
+
 export interface RangeCellValue {
   frequency: number;
   handEV: number | null;
@@ -58,7 +60,7 @@ export function hasMaskBit(mask: number, actionId: number): boolean {
  * @throws 当动作数量大于 32 时抛出异常（V1版本仅支持最多32个动作）
  */
 export function getRangePackByteLength(handCount: number, actionCount: number): number {
-  if (actionCount > 32) throw new Error(`V1 range pack supports up to 32 actions, got ${actionCount}`);
+  if (actionCount > 32) throw new PreflopStoreError("INVALID_FORMAT", `V1 range pack supports up to 32 actions, got ${actionCount}`, { actionCount });
   return handCount * (5 + actionCount * 8);
 }
 
@@ -99,7 +101,7 @@ export function encodeRangePack(params: {
   let cursor = 0;
 
   for (const handId of handIds) {
-    if (handId < 0 || handId > 168) throw new Error(`Invalid hand id: ${handId}`);
+    if (handId < 0 || handId > 168) throw new PreflopStoreError("INVALID_FORMAT", `Invalid hand id: ${handId}`, { handId });
     view.setUint8(cursor, handId);
     cursor += 1;
   }
@@ -143,7 +145,7 @@ export function decodeRangePack(params: {
   const { bytes, handCount, actionCount } = params;
   const expectedLength = getRangePackByteLength(handCount, actionCount);
   if (bytes.byteLength !== expectedLength) {
-    throw new Error(`Invalid pack length: expected ${expectedLength}, got ${bytes.byteLength}`);
+    throw new PreflopStoreError("INVALID_FORMAT", `Invalid pack length: expected ${expectedLength}, got ${bytes.byteLength}`, { expected: expectedLength, got: bytes.byteLength });
   }
 
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -204,7 +206,7 @@ export function decodeRangePackForHand(params: {
   const { bytes, handCount, actionCount, targetHandId } = params;
   const expectedLength = getRangePackByteLength(handCount, actionCount);
   if (bytes.byteLength !== expectedLength) {
-    throw new Error(`Invalid pack length: expected ${expectedLength}, got ${bytes.byteLength}`);
+    throw new PreflopStoreError("INVALID_FORMAT", `Invalid pack length: expected ${expectedLength}, got ${bytes.byteLength}`, { expected: expectedLength, got: bytes.byteLength });
   }
 
   // 步骤 1：二分查找 handId（handIds 按升序排列，最多 169 个）
@@ -374,7 +376,7 @@ export function decodeRangePackMaskMatch(params: {
   const { bytes, handCount, actionCount, targetActionIds } = params;
   const expectedLength = getRangePackByteLength(handCount, actionCount);
   if (bytes.byteLength !== expectedLength) {
-    throw new Error(`Invalid pack length: expected ${expectedLength}, got ${bytes.byteLength}`);
+    throw new PreflopStoreError("INVALID_FORMAT", `Invalid pack length: expected ${expectedLength}, got ${bytes.byteLength}`, { expected: expectedLength, got: bytes.byteLength });
   }
 
   if (targetActionIds.length === 0) {

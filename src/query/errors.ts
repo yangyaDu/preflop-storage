@@ -6,10 +6,36 @@ export type PreflopQueryErrorCode =
   | "CHECKSUM_MISMATCH"
   | "UNSUPPORTED_DATA_VERSION";
 
+export type PreflopStoreErrorCode =
+  | "INVALID_FORMAT"
+  | "INVALID_ARGUMENT"
+  | "IO_ERROR"
+  | "BUILD_ERROR"
+  | "UNSUPPORTED_DATA_VERSION";
+
 export interface PreflopQueryErrorInfo {
   code: PreflopQueryErrorCode;
   message: string;
   details?: Record<string, string | number | boolean | null>;
+}
+
+/**
+ * Base error for preflop-storage library.
+ *
+ * Used for format-level and I/O errors in the binary codec, importer,
+ * and build tools. Prefer this over plain `Error` for user-actionable
+ * failures. Plain `Error` is still acceptable for internal invariant
+ * violations (should-never-happen bugs).
+ */
+export class PreflopStoreError extends Error {
+  constructor(
+    readonly code: PreflopStoreErrorCode,
+    message: string,
+    readonly details: Record<string, string | number | boolean | null> = {},
+  ) {
+    super(message);
+    this.name = "PreflopStoreError";
+  }
 }
 
 export class PreflopQueryError extends Error {

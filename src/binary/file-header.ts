@@ -1,3 +1,5 @@
+import { PreflopStoreError } from "../query/errors";
+
 export const RANGE_FILE_MAGIC = "PFSP";
 export const RANGE_FILE_VERSION = 1;
 export const RANGE_FILE_HEADER_SIZE = 16;
@@ -52,7 +54,7 @@ export function encodeFileHeader(): Uint8Array {
  */
 export function decodeFileHeader(bytes: Uint8Array): RangeFileHeader {
   if (bytes.byteLength < RANGE_FILE_HEADER_SIZE) {
-    throw new Error(`Invalid ranges.bin header length: ${bytes.byteLength}`);
+    throw new PreflopStoreError("INVALID_FORMAT", `Invalid ranges.bin header length: ${bytes.byteLength}`, { expected: RANGE_FILE_HEADER_SIZE, got: bytes.byteLength });
   }
 
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -76,13 +78,13 @@ export function decodeFileHeader(bytes: Uint8Array): RangeFileHeader {
  * @throws 当检测到魔数错误、不支持的版本、大端序、非Float32、非指定布局、已压缩或头部大小错误时抛出异常
  */
 export function assertSupportedHeader(header: RangeFileHeader): void {
-  if (header.magic !== RANGE_FILE_MAGIC) throw new Error(`Invalid ranges.bin magic: ${header.magic}`);
-  if (header.version !== RANGE_FILE_VERSION) throw new Error(`Unsupported PFSP version: ${header.version}`);
-  if (header.endian !== 1) throw new Error("Unsupported endian, expected little-endian");
-  if (header.floatType !== 1) throw new Error("Unsupported float type, expected float32");
-  if (header.layout !== 1) throw new Error("Unsupported layout, expected sparse hand-major v1");
-  if (header.compression !== 0) throw new Error("Unsupported compression, expected none");
+  if (header.magic !== RANGE_FILE_MAGIC) throw new PreflopStoreError("INVALID_FORMAT", `Invalid ranges.bin magic: ${header.magic}`, { expected: RANGE_FILE_MAGIC, got: header.magic });
+  if (header.version !== RANGE_FILE_VERSION) throw new PreflopStoreError("UNSUPPORTED_DATA_VERSION", `Unsupported PFSP version: ${header.version}`, { expected: RANGE_FILE_VERSION, got: header.version });
+  if (header.endian !== 1) throw new PreflopStoreError("INVALID_FORMAT", "Unsupported endian, expected little-endian");
+  if (header.floatType !== 1) throw new PreflopStoreError("INVALID_FORMAT", "Unsupported float type, expected float32");
+  if (header.layout !== 1) throw new PreflopStoreError("INVALID_FORMAT", "Unsupported layout, expected sparse hand-major v1");
+  if (header.compression !== 0) throw new PreflopStoreError("INVALID_FORMAT", "Unsupported compression, expected none");
   if (header.headerSize !== RANGE_FILE_HEADER_SIZE) {
-    throw new Error(`Unsupported header size: ${header.headerSize}`);
+    throw new PreflopStoreError("INVALID_FORMAT", `Unsupported header size: ${header.headerSize}`, { expected: RANGE_FILE_HEADER_SIZE, got: header.headerSize });
   }
 }

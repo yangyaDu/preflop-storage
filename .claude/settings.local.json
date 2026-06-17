@@ -33,7 +33,18 @@
       "Bash(npx @napi-rs/cli:*)",
       "Bash(napi build:*)",
       "Bash(dir:*)",
-      "Bash(git push)"
+      "Bash(git push)",
+      "Bash(where:*)",
+      "Bash(ls:*)",
+      "Bash(npm --version:*)",
+      "Bash(npx node-gyp install:*)",
+      "Bash(npm_config_nodedir=\"E:/Program Files/nodejs\" npx napi build:*)",
+      "Bash(rustc:*)",
+      "Bash(npx tsc:*)",
+      "Bash(git stash:*)",
+      "Bash(npx husky:*)",
+      "Bash(sh:*)",
+      "Bash(git check-ignore *)"
     ]
   }
 }

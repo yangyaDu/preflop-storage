@@ -1,441 +1,497 @@
 # Preflop Storage
 
-Preflop Storage 是一个基于 Bun + TypeScript + Rust (napi-rs) 的德州扑克翻前策略二进制存储项目。
+Preflop Storage 是一个基于 **Bun + TypeScript + Rust (`napi-rs`)** 的德州扑克翻前策略存储项目。它的目标是把旧版 SQLite 行式数据转换成更适合查询和部署的二进制格式。
 
-项目目标是把旧 SQLite 中逐行保存的 range 策略数据，转换为：
+当前主线路径是 **Scheme2 + Rust**：
 
-- `meta.db`：保存场景、抽象行动线、具体行动线、action schema、二进制文件索引。
-- `ranges_*.idx`：每个维度的独立索引文件（mmap + 二分查找）。
-- `ranges_*.bin`：保存真实手牌策略矩阵，使用固定 Float32 little-endian 二进制格式。
+- `meta.db` 保存元数据和 action schema
+- `.idx` 保存维度级索引
+- `.bin` 保存真实策略矩阵
+- Rust 原生插件负责热路径查询
 
-查询热路径（.idx 二分查找 + pack 解码）使用 **Rust napi-rs 原生插件**，配合 dimension 级 schema 预加载 + Flat TypedArray 批量传输 + LRU handle 池三项优化。
+如果你是第一次进入这个仓库，建议先看这三个入口：
 
-### 性能概览（1000 随机手牌查询 + 200 批次查询，9 维度随机，warm OS cache）
+- `src/scheme2/importer/build-binary-store.ts`：Scheme2 构建主流程
+- `src/scheme2/query/query-service.ts`：Scheme2 查询服务
+- `native-addon/src/lib.rs`：Rust 原生插件入口
 
-| 方案 | 存储 | 单手牌查询 (p50) | 批量查询 20 (p50) | 批量查询 100 (p50) | 冷启动 | 综合 QPS |
-|---|---|---|---|---|---|---|
-| SQLite 原版 | 1,447 MB | 0.038 ms | 0.683 ms | 3.682 ms | 14 ms | 1,401 |
-| **Scheme2 + Rust（当前）** | **344 MB** | **0.009 ms** | **0.096 ms** | **0.505 ms** | **1.21 s** | **8,701** |
+## 文件和目录主要功能
 
-> Scheme2 热路径延迟比 SQLite 快 4-7x（单查询 4.2x，batch-100 7.3x），整体吞吐快 6.2x。
-> 冷启动较慢（1.2s vs 14ms）是 schema 预加载的代价：首次打开维度时扫描 .idx 文件提取并缓存 action schema，
-> 后续所有查询零 IO、零 DB round-trip。内存开销约 +225 MB（9 维度 mmap + schema 全量缓存）。
-> 生产环境可通过 `maxOpenHandles` 控制 LRU 池大小，默认值为 3。
+### 顶层目录
 
-## 项目主题
+| 路径 | 作用 |
+| --- | --- |
+| `src/` | TypeScript 主代码 |
+| `native-addon/` | Rust `napi-rs` 原生插件，负责 Scheme2 热路径 |
+| `tests/` | Bun 测试用例 |
+| `docs/` | 进度、SDK、部署、精度等文档 |
+| `reports/` | 分析、校验、benchmark 产出 |
+| `range-db/` | 本地 SQLite 源数据和构建后的输出目录 |
+| `package.json` | Bun scripts 入口 |
 
-旧数据结构是：
+### `src/` 里的主要模块
 
-```text
-Drill 场景 -> 抽象行动线 -> 具体行动线 -> 手牌策略数据
-```
+| 路径 | 作用 |
+| --- | --- |
+| `src/index.ts` | 对外导出公共 API |
+| `src/binary/` | 通用二进制格式、header、CRC、pack 编解码 |
+| `src/hand/hand-dict.ts` | 固定 169 手牌字典 |
+| `src/cli/args.ts` | CLI 参数解析工具 |
+| `src/utils/` | 维度解析、数学工具等通用逻辑 |
+| `src/scheme1/` | 旧方案：SQLite 索引 + `.bin` |
+| `src/scheme2/` | 当前主方案：`.idx + .bin + Rust` |
 
-本项目转换后的结构是：
+### Scheme2 相关关键文件
 
-```text
-SQLite meta.db (分表优化版):
-  drill_scenario_lines_{strategy}
-  concrete_lines_{strategy}_{playerCount}max_{depthBb}BB
-  range_pack_index_{strategy}_{playerCount}max_{depthBb}BB
-  action_schemas
+| 文件 | 作用 |
+| --- | --- |
+| `src/scheme2/cli/build-binary.ts` | Scheme2 构建 CLI 入口 |
+| `src/scheme2/importer/build-binary-store.ts` | Scheme2 构建、manifest、resume、stats 核心实现 |
+| `src/scheme2/db/schema.ts` | 轻量 `meta.db` 结构初始化 |
+| `src/scheme2/db/naming.ts` | `.idx` 文件命名规则 |
+| `src/scheme2/idx/idx-types.ts` | `.idx` 头和记录结构 |
+| `src/scheme2/idx/idx-writer.ts` | `.idx` 写入逻辑 |
+| `src/scheme2/idx/idx-reader.ts` | `.idx` 读取与二分查找 |
+| `src/scheme2/query/query-service.ts` | 推荐查询 SDK |
+| `src/scheme2/benchmark/runner.ts` | Scheme2 benchmark 运行器 |
 
-Binary ranges_*.bin:
-  hand_ids
-  action_masks
-  frequency / hand_ev Float32 matrix
-```
+### Scheme1 相关关键文件
 
-### 数据库分表优化设计
+| 文件 | 作用 |
+| --- | --- |
+| `src/scheme1/cli/build-binary.ts` | Scheme1 构建 CLI |
+| `src/scheme1/importer/build-binary-store.ts` | Scheme1 构建核心实现 |
+| `src/scheme1/query/preflop-query-service.ts` | Scheme1 查询服务 |
+| `src/scheme1/cli/verify-binary.ts` | 旧 SQLite 和 Scheme1 二进制一致性校验 |
+| `src/scheme1/cli/analyze-sqlite.ts` | 旧 SQLite 结构与体积分析 |
+| `src/scheme1/cli/analyze-binary.ts` | 二进制输出分析 |
 
-为了最大化节省空间并提升查询效率，`meta.db` 中的 `concrete_lines` 和 `range_pack_index` 表已按 **维度（strategy + playerCount + depthBb）** 拆分为具体子表：
+### Rust 原生插件关键文件
 
-1. **`concrete_lines_{strategy}_{playerCount}max_{depthBb}BB`**:
-   * 去除了冗余的 `player_count` 和 `depth_bb` 列（直接从表名推导）。
-   * `concrete_line_id` 设为 `INTEGER PRIMARY KEY`，启用 SQLite 的 rowid 别名，消除了主键 B-Tree 的额外存储开销。
-   * `UNIQUE` 约束从 4 列缩短到 2 列：`UNIQUE(abstract_line, concrete_line)`，索引树更加紧凑。
+| 文件 | 作用 |
+| --- | --- |
+| `native-addon/src/lib.rs` | `DimensionHandle` 导出入口 |
+| `native-addon/src/idx_reader.rs` | `.idx` mmap + 二分查找 |
+| `native-addon/src/bin_reader.rs` | `.bin` mmap 读取 |
+| `native-addon/src/pack_codec.rs` | range pack 热路径解码 |
+| `native-addon/src/types.rs` | Rust 侧数据结构 |
+| `native-addon/index.js` | Node/Bun 侧原生模块装载入口 |
+| `native-addon/index.d.ts` | TypeScript 类型声明 |
 
-2. **`range_pack_index_{strategy}_{playerCount}max_{depthBb}BB`**:
-   * 去除了冗余的 `player_count`、`depth_bb` 以及 `bin_file` 列（均由对应的表名和维度直接推导）。
-   * `concrete_line_id` 同样作为 `INTEGER PRIMARY KEY` 以零额外开销存储。
-   * 存储的列仅包含：`action_schema_id`、`hand_count`、`offset`、`byte_length`、`checksum`。
+## 安装和启动
 
-查询时先通过 `meta.db` 找到某个 `concrete_line_id` 对应的 `offset + byte_length`，再从 `ranges_*.bin` 中随机读取该 pack，解码成旧接口可使用的 action 策略结果。
+这个项目不是 Web 服务，没有 `dev server`。通常的使用方式是：
 
-## 目录架构
+1. 安装 Bun 依赖
+2. 编译 Rust 原生插件
+3. 运行构建、查询、校验或 benchmark 脚本
 
-```text
-preflop-storage/
-  package.json
-  tsconfig.json
-  README.md
-
-  native-addon/                 # Rust napi-rs 原生插件
-    Cargo.toml
-    src/
-      lib.rs                    # DimensionHandle 导出
-      idx_reader.rs             # mmap .idx + 二分查找
-      bin_reader.rs             # mmap .bin 零拷贝读取
-      pack_codec.rs             # 核心 pack 解码（热路径）
-      crc32c.rs                 # 编译期 CRC32C 查找表
-      types.rs                  # 二进制格式类型 + napi 对象
-    index.js                    # 平台分发入口
-    index.d.ts                  # TypeScript 类型声明
-
-  range-db/
-    range.db                    # 旧 SQLite 源数据（1.4 GB）
-    binary/                     # 方案一生成目录（.bin 文件）
-      meta.db
-      ranges_default_*.bin
-    binary-scheme2/             # 方案二生成目录（.idx + .bin 文件）
-      meta.db
-      ranges_default_*.idx
-      ranges_default_*.bin
-
-  src/
-    binary/                     # 二进制格式、pack、header、CRC、reader/writer
-    cli/                        # 命令行入口
-    db/                         # meta.db 表结构与查询封装
-    hand/                       # 169 手牌字典
-    importer/                   # 旧 SQLite -> 二进制库构建器
-    query/                      # 方案一查询服务 (PreflopQueryService)
-    benchmark/                  # 通用 benchmark 基础设施
-    scheme1/                    # 方案一：db / importer / query / benchmark
-    scheme2/                    # 方案二：db / idx / query / benchmark
-    index.ts                    # 模块统一导出
-
-  tests/
-
-  docs/
-    requirements-status-and-plan.md   # 项目进度与四方案对比
-    query-sdk.md                      # 查询 SDK 文档
-    notes/                            # 架构调研与技术笔记
-
-  reports/                     # 分析、校验、benchmark 报告
-
-## 运行环境与依赖
-
-需要安装：
+### 环境要求
 
 - Bun 1.3 或更高版本
-- Rust 工具链（仅构建 native-addon 时需要）：rustc + cargo
+- Rust stable 工具链
+- Windows 下建议安装 Visual Studio C++ Build Tools
 
-项目运行时依赖 Bun 内置能力：
+可先确认环境：
 
-- `bun:sqlite`：Bun 内置 SQLite
-- `node:fs/promises`：文件随机读写
-- `native-addon/`：Rust napi-rs 编译生成的 `.node` 二进制（提供 `DimensionHandle`）
+```powershell
+bun --version
+rustc --version
+cargo --version
+```
 
-开发阶段会安装以下 devDependencies：
-
-- `typescript`：提供 `tsc --noEmit` 类型检查。
-- `@types/bun`：提供 Bun 运行时类型，例如 `Bun.argv`、`bun:sqlite`、`bun:test`。
-- `eslint`：代码静态检查。
-- `@eslint/js`：ESLint 官方 JavaScript 推荐规则。
-- `typescript-eslint`：让 ESLint 支持 TypeScript 语法和 TS 规则。
-
-安装依赖命令：
+### 1. 安装 Bun 依赖
 
 ```powershell
 bun install
 ```
 
-构建原生插件（仅在 native-addon 源码修改后需要）：
+### 2. 构建 Rust 原生插件
+
+进入 `native-addon/`：
 
 ```powershell
-# Linux / macOS
-cd native-addon && cargo test && napi build --platform --release
-
-# Windows（需要 MSVC toolchain: rustup target add x86_64-pc-windows-msvc）
-cd native-addon && cargo test && napi build --platform --release --target x86_64-pc-windows-msvc
+cd native-addon
 ```
 
-确认 Bun 可用：
+先跑 Rust 测试：
 
 ```powershell
-bun --version
+cargo test
 ```
 
-## 常用命令
-
-### 质量检查
+再构建 `napi-rs` 模块：
 
 ```powershell
-bun test                    # 运行测试（25 个 TS 测试）
-bun run typecheck           # TypeScript 类型检查
-bun run lint                # ESLint 静态检查
-bun run check               # 一键：typecheck + lint + test
+bunx @napi-rs/cli build --platform --release
 ```
 
-### 构建
+Windows 如果需要显式指定目标三元组，可以用：
 
 ```powershell
-# 方案一构建（SQLite 索引 + .bin）
-bun run build:binary --source range-db/range.db --out range-db/binary --overwrite
+bunx @napi-rs/cli build --platform --release --target x86_64-pc-windows-msvc
+```
 
-# 方案二构建（.idx 独立索引 + .bin + 精简 meta.db）
+构建完成后回到项目根目录：
+
+```powershell
+cd ..
+```
+
+### 3. 运行基础检查
+
+```powershell
+bun run check
+```
+
+### 4. 快速体验一遍主流程
+
+先构建 Scheme2：
+
+```powershell
 bun run build:scheme2 --source range-db/range.db --out range-db/binary-scheme2 --overwrite
-
-# 构建单个维度小样本
-bun run build:binary --source range-db/range.db --out range-db/binary-smoke --dimension default:6:100 --max-packs 3 --overwrite
 ```
 
-### 查询
+再查询一手牌：
 
 ```powershell
-# 方案一查询
-bun run query:hand --dir range-db/binary --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand 22
-
-# 方案二查询（使用 .idx + Rust DimensionHandle）
-bun run query:scheme2 --dir range-db/binary-scheme2 --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand 22
-
-# 带 CRC 校验
-bun run query:hand --dir range-db/binary --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand 22 --verify-checksum
+bun run query:scheme2 --dir range-db/binary-scheme2 --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand AA
 ```
 
-### 分析与校验
+## 主要脚本说明和使用方法
+
+下面按“日常最常用”的顺序来介绍。
+
+### 1. 质量检查
+
+| 命令 | 作用 |
+| --- | --- |
+| `bun test` | 运行 Bun 测试 |
+| `bun run typecheck` | TypeScript 类型检查 |
+| `bun run lint` | ESLint 静态检查 |
+| `bun run check` | 一次执行 typecheck + lint + test |
+
+推荐在改动构建、查询、Rust 热路径后至少跑一次：
 
 ```powershell
-bun run analyze          # 一键：SQLite 分析 + 二进制分析 + 体积对比
-bun run verify:binary    # 抽样校验或全量校验
+bun run check
 ```
 
-### Benchmark
+### 2. Scheme2 构建脚本
+
+当前主构建脚本：
 
 ```powershell
-bun run benchmark:sqlite                            # SQLite 方案
-bun run benchmark:binary                            # 方案一
-bun run benchmark:scheme2                           # 方案二 + Rust
-bun run benchmark:compare                           # 生成对比报告
-bun run benchmark                                    # 一键：全部
+bun run build:scheme2
 ```
 
-## 构建配置
+它对应的实际入口是：
 
-`build-binary.ts` 支持以下参数：
+```text
+src/scheme2/cli/build-binary.ts
+```
 
-| 参数 | 默认值 | 说明 |
-|---|---:|---|
-| `--source` | `range-db/range.db` | 旧 SQLite 源数据库路径 |
-| `--out` | `range-db/binary` | 新二进制库输出目录 |
-| `--overwrite` | false | 输出目录已有 `meta.db` 时是否覆盖 |
-| `--dimension` | 全部维度 | 只构建指定维度，可重复传入 |
-| `--max-packs` | 不限制 | 每个维度最多构建多少个 concrete line pack，主要用于 smoke test |
+主要参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `--source` | 旧 SQLite 源库路径，默认 `range-db/range.db` |
+| `--out` | 输出目录，默认 `range-db/binary-scheme2` |
+| `--overwrite` | 从头覆盖构建 |
+| `--resume` | 读取 `manifest.json`，跳过已完成维度，重建失败维度 |
+| `--dimension` | 只构建指定维度，可重复传入 |
+| `--max-packs` | 限制每个维度最多构建多少个 pack，适合 smoke test |
+| `--stats` | 输出 JSON 构建统计 |
+| `--stats-md` | 输出 Markdown 构建统计 |
+
+#### 全量重建
+
+```powershell
+bun run build:scheme2 --source range-db/range.db --out range-db/binary-scheme2 --overwrite
+```
+
+#### 中断后续跑
+
+```powershell
+bun run build:scheme2 --source range-db/range.db --out range-db/binary-scheme2 --resume
+```
+
+#### 只构建一个维度
+
+```powershell
+bun run build:scheme2 --dimension default:6:100 --overwrite
+```
 
 `--dimension` 支持两种写法：
 
-```powershell
---dimension default:6:100
---dimension default_6max_100BB
+```text
+default:6:100
+default_6max_100BB
 ```
 
-当前旧库中会自动识别类似这些表：
+#### 输出构建报告
+
+```powershell
+bun run build:scheme2 `
+  --source range-db/range.db `
+  --out range-db/binary-scheme2 `
+  --overwrite `
+  --stats reports/build-scheme2.json `
+  --stats-md reports/build-scheme2.md
+```
+
+### 3. Scheme2 查询脚本
+
+当前主查询脚本：
+
+```powershell
+bun run query:scheme2
+```
+
+对应入口：
 
 ```text
-range_data_default_6max_100BB
-range_data_default_6max_200BB
-range_data_default_6max_300BB
-range_data_default_8max_100BB
-range_data_default_9max_300BB
+src/scheme2/cli/query-hand.ts
 ```
 
-## 查询配置
+主要参数：
 
-`query-hand.ts` 支持以下参数：
+| 参数 | 说明 |
+| --- | --- |
+| `--dir` | Scheme2 输出目录，默认 `range-db/binary-scheme2` |
+| `--meta` | meta.db 路径，默认 `${dir}/meta.db` |
+| `--strategy` | 策略名，默认 `default` |
+| `--player-count` | 玩家数，必填 |
+| `--depth-bb` | 筹码深度，必填 |
+| `--concrete-line-id` | 具体行动线 ID，必填 |
+| `--hand` | 手牌，如 `AA`、`AKs`、`22`，必填 |
+| `--verify-checksum` | 查询时校验 CRC32C |
 
-| 参数 | 默认值 | 说明 |
-|---|---:|---|
-| `--dir` | `range-db/binary` | 二进制库目录 |
-| `--meta` | `${dir}/meta.db` | meta SQLite 路径 |
-| `--strategy` | `default` | 策略名 |
-| `--player-count` | 必填 | 玩家数，例如 `6`、`8`、`9` |
-| `--depth-bb` | 必填 | 筹码深度，例如 `100`、`200`、`300` |
-| `--concrete-line-id` | 必填 | 具体行动线 ID |
-| `--hand` | 必填 | 手牌代码，例如 `AA`、`AKs`、`22` |
-| `--verify-checksum` | false | 读取 pack 时是否校验 CRC32C |
+#### 示例
 
-返回示例：
-
-```json
-{
-  "holeCards": "22",
-  "exists": true,
-  "actions": [
-    {
-      "actionName": "fold",
-      "actionSize": 0,
-      "amountBB": 0,
-      "frequency": 0.0016678530955687165,
-      "handEV": 0,
-      "exists": true
-    }
-  ]
-}
+```powershell
+bun run query:scheme2 `
+  --dir range-db/binary-scheme2 `
+  --player-count 6 `
+  --depth-bb 100 `
+  --concrete-line-id 1 `
+  --hand AA
 ```
 
-## 代码内读取方式
+### 4. Scheme1 构建和查询脚本
 
-### 方案二 + Rust（推荐，性能最优）
+这套脚本还保留着，主要用于：
+
+- 和旧链路对照
+- 运行已有校验脚本
+- 做兼容性测试
+
+#### 构建
+
+```powershell
+bun run build:binary --source range-db/range.db --out range-db/binary --overwrite
+```
+
+#### 查询
+
+```powershell
+bun run query:hand --dir range-db/binary --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand AA
+```
+
+### 5. 分析脚本
+
+#### 分析旧 SQLite
+
+```powershell
+bun run analyze:sqlite --source range-db/range.db --out reports/sqlite-analysis.json --md reports/sqlite-analysis.md
+```
+
+输出内容包括：
+
+- 库文件大小
+- 表数量、索引数量
+- 各 `range_data_*` 表的行数和分布
+- 重复字符串和字段载荷的粗略估算
+
+#### 分析二进制输出
+
+```powershell
+bun run analyze:binary --dir range-db/binary --sqlite-report reports/sqlite-analysis.json --out reports/binary-analysis.json --md reports/storage-analysis.md
+```
+
+输出内容包括：
+
+- `meta.db` 大小
+- `ranges_*.bin` 大小
+- pack 数、平均 pack 大小
+- action schema 复用情况
+- 新旧体积对比
+
+#### 一键分析
+
+```powershell
+bun run analyze
+```
+
+### 6. 校验脚本
+
+当前校验脚本是：
+
+```powershell
+bun run verify:binary
+```
+
+对应入口：
+
+```text
+src/scheme1/cli/verify-binary.ts
+```
+
+注意：这条脚本当前主要用于 **Scheme1 二进制目录**，因为它依赖 `range_pack_index_*` 表做索引对照。
+
+#### 抽样校验
+
+```powershell
+bun run verify:binary `
+  --source range-db/range.db `
+  --dir range-db/binary `
+  --mode sample `
+  --sample-size 10000 `
+  --out reports/verify-sample.json `
+  --md reports/verify-sample.md
+```
+
+#### 全量校验
+
+```powershell
+bun run verify:binary `
+  --source range-db/range.db `
+  --dir range-db/binary `
+  --mode full `
+  --out reports/verify-full.json `
+  --md reports/verify-full.md
+```
+
+### 7. Benchmark 脚本
+
+#### SQLite 基线
+
+```powershell
+bun run benchmark:sqlite
+```
+
+#### Scheme1 二进制
+
+```powershell
+bun run benchmark:binary
+```
+
+#### Scheme2 主线路径
+
+```powershell
+bun run benchmark:scheme2
+```
+
+推荐的 Scheme2 示例：
+
+```powershell
+bun run benchmark:scheme2 `
+  --dir range-db/binary-scheme2 `
+  --iterations 1000 `
+  --batch-iterations 200 `
+  --batch-size 20 `
+  --warmup-iterations 20
+```
+
+额外常用参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `--dimension` | 只测指定维度 |
+| `--seed` | workload 随机种子 |
+| `--verify-checksum` | 查询时校验 CRC |
+| `--verify-results` | 抽样比对查询结果 |
+| `--prewarm-action-schemas` | 预热 action schema |
+| `--workload-mode` | workload 模式 |
+
+#### 对比报告
+
+如果要比较 SQLite 和 Scheme2，可以显式指定报告路径：
+
+```powershell
+bun run benchmark:compare `
+  --sqlite reports/benchmark-sqlite.json `
+  --binary reports/benchmark-scheme2.json `
+  --out reports/benchmark-report.json `
+  --md reports/benchmark-report.md
+```
+
+注意：`package.json` 里的 `bun run benchmark` 聚合脚本目前仍走的是 SQLite + Scheme1 + compare 这条历史链路，不包含 `benchmark:scheme2`。
+
+## 输出目录和产物说明
+
+### Scheme2 输出目录
+
+```text
+range-db/binary-scheme2/
+  manifest.json
+  meta.db
+  ranges_default_6max_100BB.idx
+  ranges_default_6max_100BB.bin
+  ...
+```
+
+其中：
+
+- `manifest.json`：记录构建时间、源库 checksum、维度状态、产物文件
+- `meta.db`：保存 drill 场景、concrete line、action schema
+- `.idx`：维度索引
+- `.bin`：策略矩阵数据
+
+### Scheme1 输出目录
+
+```text
+range-db/binary/
+  meta.db
+  ranges_default_6max_100BB.bin
+  ...
+```
+
+## 代码里怎么用
+
+推荐直接使用 `Scheme2QueryService`：
 
 ```ts
 import { Scheme2QueryService } from "./src/scheme2/query/query-service";
 
 const service = new Scheme2QueryService("range-db/binary-scheme2/meta.db", "range-db/binary-scheme2", {
   verifyChecksums: false,
-  maxOpenHandles: 3,                // LRU pool size for mmap handles (default 3)
-  prewarmActionSchemas: false,      // true = preload ALL schemas at startup
+  maxOpenHandles: 3,
+  prewarmActionSchemas: false,
 });
 
-// 预热维度（同步调用，Rust DimensionHandle mmap .idx + .bin）
 service.prewarmDimension({ strategy: "default", playerCount: 6, depthBb: 100 });
 
-// 查询手牌策略（同步热路径，Rust 内部完成 二分查找 + 解码）
-const strategy = service.getHandStrategySync({
+const result = service.getHandStrategySync({
   strategy: "default",
   playerCount: 6,
   depthBb: 100,
   concreteLineId: 1,
-  holeCards: "22",
-});
-// → { holeCards: "22", exists: true, actions: [{ actionName: "fold", frequency: 0.0017, ... }] }
-
-// 异步版本（自动预热 + 查询，首次调用时打开文件）
-const strategy2 = await service.getHandStrategy({
-  strategy: "default",
-  playerCount: 6,
-  depthBb: 100,
-  concreteLineId: 2,
   holeCards: "AA",
 });
-
-// 批量查询（Rust queryBatch 原生支持）
-const batch = await service.getHandStrategiesBatch({
-  strategy: "default",
-  playerCount: 6,
-  depthBb: 100,
-  requests: [
-    { concreteLineId: 1, holeCards: "AA" },
-    { concreteLineId: 1, holeCards: "AKs" },
-  ],
-});
-
-// Drill 场景 → 具体行动线
-const lines = service.getDrillScenarioLines({ drillName: "UTG", playerCount: 6 });
-const concrete = service.getConcreteLines({ playerCount: 6, depthBb: 100, abstractLine: lines[0] });
 
 service.close();
 ```
 
-### 方案一（SQLite 索引 + .bin）
+更完整的 SDK 说明见 `docs/query-sdk.md`。
 
-```ts
-import { PreflopQueryService } from "./src/query/preflop-query-service";
+## 相关文档
 
-const service = new PreflopQueryService("range-db/binary/meta.db", "range-db/binary", {
-  packCacheSize: 256,
-});
-
-const strategy = await service.getHandStrategy({
-  strategy: "default",
-  playerCount: 6,
-  depthBb: 100,
-  concreteLineId: 1,
-  holeCards: "22",
-});
-
-// 批量查询、按 action 筛选、完整 range 等功能一致
-const batch = await service.getHandStrategiesBatch({
-  strategy: "default",
-  playerCount: 6,
-  depthBb: 100,
-  requests: [
-    { concreteLineId: 1, holeCards: "AA" },
-    { concreteLineId: 1, holeCards: "AKs" },
-  ],
-});
-
-await service.close();
-```
-
-> 方案一和方案二的 API 接口基本一致，差异在于内部查询引擎（SQLite 索引 vs Rust .idx 二分查找）。
-> 完整 SDK 文档见 `docs/query-sdk.md`。
-
-## 二进制格式
-
-每个 `ranges_*.bin` 以固定 16 字节 header 开头：
-
-```text
-magic[4]        = PFSP
-version_u16     = 1
-endian_u8       = 1   # little-endian
-float_type_u8   = 1   # float32
-layout_u8       = 1   # sparse hand-major v1
-compression_u8  = 0   # none
-header_size_u16 = 16
-reserved[4]
-```
-
-每个 concrete line 对应一个 pack：
-
-```text
-hand_ids[hand_count]                         # uint8
-action_masks[hand_count]                     # uint32_le
-values[hand_count][action_count][2]          # float32_le
-```
-
-其中：
-
-```text
-values[..., 0] = frequency
-values[..., 1] = hand_ev
-```
-
-`action_masks` 用来区分：
-
-- 某 action 不存在
-- 某 action 存在但 frequency 等于 0
-
-## 生成物说明
-
-### 方案一（`range-db/binary/`）
-
-完整构建后至少包含：
-
-```text
-meta.db                                   # 87 MB（SQLite 索引 + 元数据）
-ranges_default_{6max,8max,9max}_{100,200,300}BB.bin   # 9 个 .bin，共 ~260 MB
-```
-
-### 方案二（`range-db/binary-scheme2/`，推荐）
-
-完整构建后至少包含：
-
-```text
-meta.db                                   # 74 MB（精简元数据 + action_schemas）
-ranges_default_{6max,8max,9max}_{100,200,300}BB.idx   # 9 个 .idx，共 ~11 MB
-ranges_default_{6max,8max,9max}_{100,200,300}BB.bin   # 9 个 .bin，共 ~260 MB
-```
-
-> 方案二总量 ~344 MB，为 SQLite 源库 (1,447 MB) 的 24%。
-
-部署或后端读取时，需要保证：
-
-- `meta.db` 存在。
-- `.idx` 和 `.bin` 文件成对存在。
-- `native-addon/` 已编译生成 `.node` 文件（Rust DimensionHandle 运行时依赖）。
-- hand 代码必须来自固定 169 手牌字典，例如 `AA`、`AKs`、`AKo`、`22`。
-
-## 开发注意事项
-
-### TypeScript 侧
-- 不要修改 `HANDS_169` 的顺序；顺序变化需要升级二进制版本。
-- 默认线上查询不建议每次校验 CRC；发布前或 debug 时可以打开 `--verify-checksum`。
-- `hand_ev` 为 `null` 时会在二进制中写入 `NaN`，读取时再转回 `null`。
-- frequency 和 hand_ev 使用 Float32 保存，与旧 SQLite REAL 可能存在极小精度差。
-- 原始 `range-db/range.db` 不会被 builder 原地修改。
-
-### Rust 侧
-- 修改 `native-addon/src/*.rs` 后必须重新编译：`cd native-addon && cargo test && napi build --platform --release`（Windows 需加 `--target x86_64-pc-windows-msvc`）
-- Rust 测试独立于 Bun 测试：`cd native-addon && cargo test`
-- `.idx` / `.bin` 文件格式变更需要同步更新 Rust `types.rs` 和 TypeScript `idx-types.ts`
-- `napi build` 生成的 `index.js` 会根据 `process.config` 自动选择 `win32-x64-msvc.node` / `linux-x64-gnu.node` 等平台变体
-- CRC32C 查找表在 Rust 编译期计算（`const`），零运行时开销
+| 文档 | 说明 |
+| --- | --- |
+| `docs/requirements-status-and-plan.md` | 当前进度和状态 |
+| `docs/query-sdk.md` | 查询 SDK 说明 |
+| `docs/deploy-and-rollback.md` | 部署、发布和回滚 |
+| `docs/float32-precision-spec.md` | 精度与误差标准 |
+| `docs/error-handling-strategy.md` | 错误处理策略 |
+| `reports/` | 分析、校验、benchmark 报告 |

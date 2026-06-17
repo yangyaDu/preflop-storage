@@ -60,17 +60,31 @@ if (workloadPath) {
   workloadSource = "generated";
 }
 
+const evictOsCache = getBooleanArg(args, "evict-os-cache");
+
 const runnerOptions = {
   verifyChecksums,
   prewarmActionSchemas,
+  evictOsCache,
 };
 
+// OS cold start with eviction (if requested)
 const coldStart = await measureScheme2ColdStart({
   metaDbPath,
   binaryDir,
   options: runnerOptions,
   item: workload.handQueries[0],
 });
+
+// Second cold start measurement WITHOUT eviction for comparison
+const coldStartWarmCache = evictOsCache
+  ? await measureScheme2ColdStart({
+      metaDbPath,
+      binaryDir,
+      options: { ...runnerOptions, evictOsCache: false },
+      item: workload.handQueries[0],
+    })
+  : null;
 const memoryBefore = getMemorySnapshot();
 const runner = new Scheme2BenchmarkRunner(metaDbPath, binaryDir, runnerOptions);
 
@@ -124,6 +138,18 @@ try {
 
   if (prewarmActionSchemas) {
     notes.push("Action schemas are prewarmed into the Scheme2QueryService cache before hot measurements.");
+  }
+
+  if (coldStart && coldStartWarmCache) {
+    const coldMs = coldStart.totalMs;
+    const warmMs = coldStartWarmCache.totalMs;
+    const diff = coldMs - warmMs;
+    const pct = warmMs > 0 ? ((diff / warmMs) * 100).toFixed(1) : "0.0";
+    notes.push(
+      `OS-cache-evicted cold start: ${coldMs.toFixed(3)} ms. Warm OS cache cold start: ${warmMs.toFixed(3)} ms. ` +
+        `Difference: ${diff.toFixed(3)} ms (${pct}% slower). ` +
+        "Eviction fills OS file cache with large temp file reads.",
+    );
   }
 
   const report: BenchmarkRunReport = {

@@ -1,0 +1,24 @@
+[
+  {
+    "date": "2026-06-17",
+    "mode": "Health Dashboard",
+    "score": 98,
+    "findings": {
+      "critical": 0,
+      "warning": 1,
+      "suggestion": 2
+    },
+    "scope": "entire project"
+  },
+  {
+    "date": "2026-06-17",
+    "mode": "Health Dashboard",
+    "score": 98,
+    "findings": {
+      "critical": 0,
+      "warning": 1,
+      "suggestion": 2
+    },
+    "scope": "entire project"
+  }
+]

@@ -1,3 +1,5 @@
+import { PreflopStoreError } from "../query/errors";
+
 const CRC32C_POLY = 0x82f63b78;
 
 const CRC32C_TABLE = new Uint32Array(256);
@@ -37,6 +39,6 @@ export function crc32c(bytes: Uint8Array): number {
 export function assertCrc32c(bytes: Uint8Array, expected: number): void {
   const actual = crc32c(bytes);
   if (actual !== (expected >>> 0)) {
-    throw new Error(`CRC32C mismatch: expected ${expected >>> 0}, got ${actual}`);
+    throw new PreflopStoreError("INVALID_FORMAT", `CRC32C mismatch: expected ${expected >>> 0}, got ${actual}`, { expected: expected >>> 0, got: actual });
   }
 }

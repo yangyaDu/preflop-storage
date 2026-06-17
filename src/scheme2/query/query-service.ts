@@ -5,7 +5,7 @@ import { assertCrc32c } from "../../binary/crc32c";
 import { RangeBinFileReader } from "../../binary/range-bin-file-reader";
 import { decodeRangePackForHand, decodeRangePackMaskMatch } from "../../binary/range-pack-codec";
 import { getHandCode, getHandId } from "../../hand/hand-dict";
-import { PreflopQueryError, toPreflopQueryErrorInfo, type PreflopQueryErrorInfo } from "../../query/errors";
+import { PreflopQueryError, PreflopStoreError, toPreflopQueryErrorInfo, type PreflopQueryErrorInfo } from "../../query/errors";
 import {
   getBinFileName,
   getConcreteLinesTableName,
@@ -598,7 +598,7 @@ export class Scheme2QueryService {
     // Header
     const magic = view.getUint32(offset, true);
     if (magic !== FLAT_MAGIC) {
-      throw new Error(`Invalid flat buffer magic: 0x${magic.toString(16)}`);
+      throw new PreflopStoreError("INVALID_FORMAT", `Invalid flat buffer magic: 0x${magic.toString(16)}`, { expected: FLAT_MAGIC, got: magic });
     }
     offset += 4;
     const requestCount = view.getUint32(offset, true);
