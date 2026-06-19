@@ -112,7 +112,24 @@ V1 目标是固化本机构建流程；GitHub Actions 多平台矩阵、npm preb
 
 这部分用于防止 benchmark 工具静默失败，测试不绑定具体延迟/QPS 阈值，避免受本机性能波动影响。
 
-### 5. 当前质量状态
+### 5. Float32 精度策略 V1
+
+已将 Float32 精度校验从固定绝对容差升级为 bit-exact 策略：
+
+- 新增 `src/precision/float32.ts`，提供 `Math.fround(source)` 对齐、Float32 bit pattern 比较、nullable EV 语义校验和量化误差统计。
+- Scheme2 cross verify 现在要求 decoded value 与 source 正确舍入后的 Float32 值完全一致。
+- Cross verify 报告新增 `precision` 段，统计 `checkedValues`、`bitExactValues`、`mismatchValues`、最大量化误差、最大实现误差、P95/P99 量化误差和最大误差样本。
+- 旧 `1e-6 / 1e-5` 固定容差降级为历史观测参考，不再作为核心正确性标准。
+- 新增测试覆盖：普通小数、相邻 Float32 边界、signed zero、nullable handEV、量化误差统计，以及 source 值在旧容差内变化但落到不同 Float32 时 cross verify 必须失败。
+
+当前硬标准：
+
+```text
+decoded === Math.fround(source)
+Float32 bits(decoded) === Float32 bits(source)
+```
+
+### 6. 当前质量状态
 
 最近一次质量检查结果：
 
@@ -120,7 +137,7 @@ V1 目标是固化本机构建流程；GitHub Actions 多平台矩阵、npm preb
 - `bun run lint` 通过
 - `bun test` 通过
 - `cargo test --manifest-path native-addon/Cargo.toml` 通过
-- 总计 `112` 个 Bun 测试通过，`19` 个 Rust 测试通过
+- 总计 `119` 个 Bun 测试通过，`19` 个 Rust 测试通过
 
 ## 当前产物与能力
 

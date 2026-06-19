@@ -267,4 +267,34 @@ describe("Scheme2 cross verify", () => {
     const jsonContent = JSON.parse(readFileSync(outPath, "utf-8"));
     expect(jsonContent.mode).toBe("cross");
   });
+
+  test("cross mode fails when source value moves to a different Float32 inside legacy tolerance", async () => {
+    const { outDir, sourcePath } = await buildFixture();
+
+    const db = new Database(sourcePath);
+    try {
+      db.query(`
+        UPDATE range_data_default_6max_100BB
+        SET frequency = ?
+        WHERE concrete_line_id = 2
+          AND hole_cards = 'AKs'
+      `).run(0.5000000596046448);
+    } finally {
+      db.close();
+    }
+
+    const { runCrossVerify } = await import("../src/scheme2/verify/cross");
+    const report = await runCrossVerify({
+      dir: outDir,
+      sourceDbPath: sourcePath,
+      sampleSize: 0,
+      maxFailures: 50,
+      verifyChecksums: true,
+    });
+
+    expect(report.totals.failedSourceRecords).toBeGreaterThan(0);
+    expect(report.failures.some((failure) => failure.reason === "FREQUENCY_FLOAT32_MISMATCH")).toBe(true);
+    expect(report.precision?.frequency.mismatchValues).toBeGreaterThan(0);
+    expect(report.precision?.frequency.maxImplementationAbsError).toBeGreaterThan(0);
+  });
 });

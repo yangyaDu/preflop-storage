@@ -12,6 +12,13 @@ import {
   quoteIdentifier,
 } from "../../../db/naming";
 import { discoverRangeDimensions, type OldRangeRow } from "../../../importer/old-sqlite";
+import {
+  checkFloat32RoundTrip,
+  checkNullableFloat32RoundTrip,
+  Float32PrecisionStatsAccumulator,
+  formatFloat32Bits,
+  type Float32PrecisionStats,
+} from "../../../precision/float32";
 import type { BuildManifest } from "../../importer/build-binary-store";
 import {
   IDX_HEADER_SIZE,
@@ -22,8 +29,6 @@ import {
 import type { VerifyFailure } from "../report";
 
 const ACTION_VALUE_TOLERANCE = 1e-6;
-const FREQUENCY_TOLERANCE = 1e-6;
-const HAND_EV_TOLERANCE = 1e-5;
 
 export interface SourceCrossOptions {
   sourceDbPath: string;
@@ -40,6 +45,10 @@ export interface SourceCrossResult {
   extraBinaryRecords: number;
   maxFrequencyError: number;
   maxHandEvError: number;
+  precision: {
+    frequency: Float32PrecisionStats;
+    handEv: Float32PrecisionStats;
+  };
 }
 
 export function runSourceCross(options: SourceCrossOptions): SourceCrossResult {
@@ -54,6 +63,8 @@ export function runSourceCross(options: SourceCrossOptions): SourceCrossResult {
   let extraBinaryRecords = 0;
   let maxFrequencyError = 0;
   let maxHandEvError = 0;
+  const frequencyPrecision = new Float32PrecisionStatsAccumulator();
+  const handEvPrecision = new Float32PrecisionStatsAccumulator();
 
   // Cache action schemas from meta.db
   const actionSchemaCache = new Map<number, ActionDef[]>();
@@ -310,12 +321,49 @@ export function runSourceCross(options: SourceCrossOptions): SourceCrossResult {
 
           let reason: string | null = null;
           let details = "";
-          if (frequencyError > FREQUENCY_TOLERANCE) {
-            reason = "FREQUENCY_MISMATCH";
-            details = `old=${row.frequency}, binary=${cell.frequency}, diff=${frequencyError}`;
-          } else if (handEvError > HAND_EV_TOLERANCE) {
-            reason = "HAND_EV_MISMATCH";
-            details = `old=${row.hand_ev}, binary=${cell.handEV}, diff=${handEvError}`;
+          const context = `line=${concreteLineId} hole=${row.hole_cards} action=${row.action_name}`;
+          const frequencyCheck = checkFloat32RoundTrip(Number(row.frequency), cell.frequency);
+          frequencyPrecision.add(frequencyCheck, context);
+
+          if (!frequencyCheck.ok) {
+            reason = frequencyCheck.reason === "FLOAT32_VALUE_MISMATCH"
+              ? "FREQUENCY_FLOAT32_MISMATCH"
+              : "FREQUENCY_INVALID_NUMBER";
+            details = [
+              `source=${row.frequency}`,
+              `expectedFloat32=${frequencyCheck.expectedValue}`,
+              `actual=${cell.frequency}`,
+              `expectedBits=${formatFloat32Bits(frequencyCheck.expectedBits)}`,
+              `actualBits=${formatFloat32Bits(frequencyCheck.actualBits)}`,
+              `quantizationDiff=${frequencyCheck.quantizationAbsError}`,
+              `implementationDiff=${frequencyCheck.implementationAbsError}`,
+            ].join(", ");
+          }
+
+          const handEvCheck = checkNullableFloat32RoundTrip(row.hand_ev, cell.handEV);
+          if (handEvCheck.value) {
+            handEvPrecision.add(handEvCheck.value, context);
+          } else if (handEvCheck.reason === "NULL_MATCH") {
+            handEvPrecision.addNull();
+          }
+
+          if (!reason && !handEvCheck.ok) {
+            reason = handEvCheck.reason === "NULL_MISMATCH"
+              ? "HAND_EV_NULL_MISMATCH"
+              : handEvCheck.reason === "FLOAT32_VALUE_MISMATCH"
+                ? "HAND_EV_FLOAT32_MISMATCH"
+                : "HAND_EV_INVALID_NUMBER";
+            details = handEvCheck.value
+              ? [
+                  `source=${row.hand_ev}`,
+                  `expectedFloat32=${handEvCheck.value.expectedValue}`,
+                  `actual=${cell.handEV}`,
+                  `expectedBits=${formatFloat32Bits(handEvCheck.value.expectedBits)}`,
+                  `actualBits=${formatFloat32Bits(handEvCheck.value.actualBits)}`,
+                  `quantizationDiff=${handEvCheck.value.quantizationAbsError}`,
+                  `implementationDiff=${handEvCheck.value.implementationAbsError}`,
+                ].join(", ")
+              : `source=${row.hand_ev}, actual=${cell.handEV}`;
           }
 
           if (reason) {
@@ -326,7 +374,7 @@ export function runSourceCross(options: SourceCrossOptions): SourceCrossResult {
                 check: key,
                 reason,
                 message: details,
-                context: `line=${concreteLineId} hole=${row.hole_cards} action=${row.action_name}`,
+                context,
               });
             }
           }
@@ -349,7 +397,18 @@ export function runSourceCross(options: SourceCrossOptions): SourceCrossResult {
     sourceDb.close();
   }
 
-  return { failures, checkedRecords, failedRecords, extraBinaryRecords, maxFrequencyError, maxHandEvError };
+  return {
+    failures,
+    checkedRecords,
+    failedRecords,
+    extraBinaryRecords,
+    maxFrequencyError,
+    maxHandEvError,
+    precision: {
+      frequency: frequencyPrecision.toJSON(),
+      handEv: handEvPrecision.toJSON(),
+    },
+  };
 }
 
 function findMatchingAction(actions: ActionDef[], row: OldRangeRow): ActionDef | null {

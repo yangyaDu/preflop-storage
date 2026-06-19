@@ -1,5 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { formatNumber, markdownTable } from "../../analysis/format";
+import type { Float32ErrorSample, Float32PrecisionStats } from "../../precision/float32";
 
 // ── Shared types ──────────────────────────────────────────────
 
@@ -54,6 +55,14 @@ export interface Scheme2VerifyReport {
   tolerances: {
     frequency: number;
     handEv: number;
+  };
+  precisionPolicy: {
+    numericFields: "float32-bit-exact";
+    nullableHandEv: "null-or-float32-bit-exact";
+  };
+  precision?: {
+    frequency: Float32PrecisionStats;
+    handEv: Float32PrecisionStats;
   };
   totals: {
     dimensions: number;
@@ -126,6 +135,10 @@ export function createReport(
       frequency: FREQUENCY_TOLERANCE,
       handEv: HAND_EV_TOLERANCE,
     },
+    precisionPolicy: {
+      numericFields: "float32-bit-exact",
+      nullableHandEv: "null-or-float32-bit-exact",
+    },
     totals: {
       dimensions: totalDims,
       manifestOk: !manifestFailed,
@@ -175,15 +188,72 @@ export function writeMdReport(report: Scheme2VerifyReport, mdPath: string): void
       ],
     ),
     ``,
-    `## Tolerances`,
+    `## Precision Policy`,
     markdownTable(
       ["Parameter", "Value"],
       [
-        ["frequency", `${report.tolerances.frequency}`],
-        ["handEV", `${report.tolerances.handEv}`],
+        ["numeric fields", report.precisionPolicy.numericFields],
+        ["nullable handEV", report.precisionPolicy.nullableHandEv],
+        ["legacy frequency tolerance", `${report.tolerances.frequency}`],
+        ["legacy handEV tolerance", `${report.tolerances.handEv}`],
       ],
     ),
   ];
+
+  if (report.precision) {
+    lines.push(
+      ``,
+      `## Float32 Quantization`,
+      markdownTable(
+        [
+          "Field",
+          "Checked",
+          "Nulls",
+          "Bit Exact",
+          "Mismatches",
+          "Max Quantization Abs",
+          "P95 Quantization Abs",
+          "P99 Quantization Abs",
+          "Max Implementation Abs",
+        ],
+        [
+          ["frequency", ...precisionRow(report.precision.frequency)],
+          ["handEV", ...precisionRow(report.precision.handEv)],
+        ],
+      ),
+    );
+
+    const topSamples: Array<[string, Float32ErrorSample]> = [
+      ...report.precision.frequency.topQuantizationErrors.map((sample): [string, Float32ErrorSample] => ["frequency", sample]),
+      ...report.precision.handEv.topQuantizationErrors.map((sample): [string, Float32ErrorSample] => ["handEV", sample]),
+    ];
+
+    const topRows = topSamples
+      .sort((left, right) => right[1].quantizationAbsError - left[1].quantizationAbsError)
+      .slice(0, 20)
+      .map(([field, sample]) => [
+        field,
+        sample.context,
+        sample.sourceValue,
+        sample.expectedValue,
+        sample.actualValue,
+        sample.quantizationAbsError,
+        sample.implementationAbsError,
+        sample.expectedBits,
+        sample.actualBits,
+      ]);
+
+    if (topRows.length > 0) {
+      lines.push(
+        ``,
+        `## Largest Float32 Quantization Errors`,
+        markdownTable(
+          ["Field", "Context", "Source", "Expected Float32", "Actual", "Quantization Abs", "Implementation Abs", "Expected Bits", "Actual Bits"],
+          topRows,
+        ),
+      );
+    }
+  }
 
   // Dimension details
   if (report.dimensions.length > 0) {
@@ -225,6 +295,19 @@ export function writeMdReport(report: Scheme2VerifyReport, mdPath: string): void
   }
 
   writeFileSync(mdPath, lines.join("\n"), "utf-8");
+}
+
+function precisionRow(stats: Float32PrecisionStats): Array<string | number> {
+  return [
+    formatNumber(stats.checkedValues),
+    formatNumber(stats.nullValues),
+    formatNumber(stats.bitExactValues),
+    formatNumber(stats.mismatchValues),
+    stats.maxQuantizationAbsError,
+    stats.p95QuantizationAbsError,
+    stats.p99QuantizationAbsError,
+    stats.maxImplementationAbsError,
+  ];
 }
 
 // Error → Reason mapping utility

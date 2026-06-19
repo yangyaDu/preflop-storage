@@ -343,23 +343,28 @@ const raiseHands = await service.getHandsByAction({
 - 返回 `string[]`（holeCards 数组）。
 - 所有返回手牌的 raise 频率都大于 `0.1`。
 
-## 用例 13：Float32 精度差异
+## 用例 13：Float32 bit-exact 精度校验
 
 测试目标：
 
-验证新二进制格式使用 Float32 后，与旧 SQLite REAL 之间只存在可接受的微小误差。
+验证新二进制格式使用 Float32 后，只存在 IEEE754 Float32 正确舍入带来的不可避免量化损失，不存在额外实现损失。
 
 测试方式：
 
 1. 从旧表读取某个 `concrete_line_id + hole_cards + action_name`。
 2. 从新二进制库读取同一项。
-3. 比较 `frequency` 和 `hand_ev`。
+3. 对 `frequency` 和非 null `hand_ev` 计算 `Math.fround(source)`。
+4. 比较 decoded 值与 `Math.fround(source)` 的 Float32 bit pattern。
+5. 对 null `hand_ev`，校验 decoded 仍为 null。
 
 预期结果：
 
 ```text
-abs(old_frequency - new_frequency) <= 1e-6
-abs(old_hand_ev - new_hand_ev) <= 1e-5
+decoded_frequency === Math.fround(old_frequency)
+float32Bits(decoded_frequency) === float32Bits(old_frequency)
+
+decoded_hand_ev === Math.fround(old_hand_ev)  // old_hand_ev 非 null 时
+decoded_hand_ev === null                     // old_hand_ev 为 null 时
 ```
 
 ## 用例 14：action 缺失与 frequency 为 0 的区分

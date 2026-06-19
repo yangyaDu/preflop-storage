@@ -1,106 +1,138 @@
-# Float32 精度容差规范
+# Float32 精度策略
 
-> 版本：1.0
-> 生成日期：2026-06-17
+> 版本：2.0
+> 更新日期：2026-06-20
 > 关联问题：P2-5 Float32 精度差异（`docs/issues-and-action-items.md`）
 
-## 1. 背景
+## 1. 当前结论
 
-本项目将 GTO 策略数据中的 `frequency` 和 `hand_ev` 字段以 Float32 little-endian 编码存储。原始 SQLite 数据使用双精度浮点数（IEEE 754 binary64），在往返编码（binary64 → Float32 → binary64）过程中，由于 Float32 有效位数仅为 23 位（约 7 位十进制有效数字），会产生微小的舍入误差。
+当前项目继续使用 Float32 存储 `frequency` 和 `hand_ev`，但校验标准不再以固定绝对容差为主。
 
-## 2. 编码规范
+新的硬标准是：
 
-### 2.1 Range Pack 格式
-
-```
-frequency:  Float32 LE（4 字节）
-hand_ev:    Float32 LE（4 字节），null 写为 NaN（0x7FC00000）
+```text
+decoded value 必须等于 source value 按 IEEE754 Float32 正确舍入后的值。
 ```
 
-### 2.2 Flat Buffer 格式
-
-```
-frequency:  Float64（8 字节，Rust src 读取 Float32 后对 JS 侧展示为 f64）
-hand_ev:    Float64（8 字节，同上）
-```
-
-注：虽然 Rust 热路径使用 `queryBatchFlat` 返回 Float64 对 JS 侧友好，但内部存储层始终是 Float32，因此读取精度上限仍为 Float32 的 7 位有效数字。
-
-## 3. 容差阈值
-
-基于全量校验结果（23,806,716 条记录对比），定义以下容差标准：
-
-| 字段 | 容差阈值 | 设置依据 |
-|------|---------|---------|
-| `frequency` | **1e-6** | 全量校验中最大误差 `2.98e-8`，远在此阈值内 |
-| `hand_ev` | **1e-5** | 全量校验中最大误差 `1.5258789e-5`，发生在 `default:9max:300BB` 的 `AA/raise` 场景 |
-
-### 3.1 已知边界 Case
-
-全量校验发现 23,806,716 条记录中有 **70 条** `hand_ev` 精度误差超出默认容差 `1e-5`：
-
-| 维度 | 手牌 | Action | 误差 |
-|------|------|--------|------|
-| default:9max:300BB | AA | raise | ~1.53e-5 |
-
-这 70 条记录属于同一批 `AA/raise` 场景的不同 `concrete_line_id`。根因分析：原始 SQLite 中 `hand_ev` 值本身在 Float32 中恰好落在两个可表示值的中间位置（tie 场景），不同编译器/运行时的 round-to-nearest-even 行为可能产生微小差异。**该误差在实际 GTO 决策分析中无影响**（差异仅在第 7-8 位有效数字之后）。
-
-### 3.2 推荐宽松容差
-
-对于将 hand_ev 用于实际决策的场景，推荐阈值可放宽至：
-
-| 字段 | 推荐生产容差 | 说明 |
-|------|------------|------|
-| `frequency` | **1e-5** | 频率值范围为 [0, 1]，完全足够 |
-| `hand_ev` | **5e-5** | 覆盖已知所有边界 case |
-
-## 4. 校验工具容差配置
-
-### 4.1 当前硬编码阈值
-
-`src/scheme1/cli/verify-binary.ts` 中当前硬编码：
+也就是：
 
 ```ts
-const FREQUENCY_TOLERANCE = 1e-6;
-const HAND_EV_TOLERANCE = 1e-5;
+expected = Math.fround(source)
+actual = decoded
 ```
 
-### 4.2 建议 CLI 参数化
+只有 `actual` 与 `expected` 完全一致，才视为通过。这样只允许 Float32 本身不可避免的量化损失，不允许编码、解码、字节序、Rust/JS 转换或验证逻辑引入额外损失。
 
-后续可添加 `--freq-tolerance` 和 `--ev-tolerance` 参数：
+## 2. 存储格式
 
-```powershell
-bun run verify:binary --source range-db/range.db --dir range-db/binary \
-  --mode full \
-  --freq-tolerance 1e-5 \
-  --ev-tolerance 5e-5
+### Range Pack
+
+```text
+frequency: Float32 little-endian
+hand_ev:   Float32 little-endian，null 写为 canonical NaN
 ```
 
-## 5. 决策指南
+### 查询返回
 
-### 5.1 何时需要关注
+Rust / JS 查询层会把 Float32 读取结果以 JS `number` 暴露。JS `number` 是 Float64，但它承载的值必须仍然是原始 Float32 可精确表示的值。
 
-- 当校验报告中 `frequency` 误差 > 1e-5 时：数据可能存在写入损坏
-- 当校验报告中 `hand_ev` 误差 > 1e-4 时：数据可能存在写入损坏
+## 3. 校验原则
 
-### 5.2 何时可以忽略
+### 3.1 数值字段
 
-- `frequency` 误差 ≤ 1e-6：属于正常 Float32 往返编码误差
-- `hand_ev` 误差 ≤ 5e-5：属于正常 Float32 往返编码误差，主要在 9max:300BB 的 AA/raise 高 EV 值场景
+对 `frequency` 和非 null `hand_ev`：
 
-### 5.3 精度损失原理
+```text
+expectedBits = float32Bits(source)
+actualBits = float32Bits(actual)
+expectedValue = Math.fround(source)
 
+通过条件：
+  actualBits == expectedBits
+  且 Object.is(actual, expectedValue)
 ```
-原始值（binary64）:  3.141592653589793
-Float32 存储:        3.1415927      （只有 7 位有效数字）
-JS 读取（binary64）: 3.1415927410125732
-误差:                8.74e-8
+
+说明：
+
+- `actualBits == expectedBits` 确认二进制 Float32 表示一致。
+- `Object.is()` 保留 `-0` 和 `+0` 的差异。
+- 即使 `abs(source - actual) <= 1e-6`，只要落到不同 Float32 表示，也必须失败。
+
+### 3.2 Nullable `hand_ev`
+
+```text
+source null + decoded null => pass
+source null + decoded number => fail
+source number + decoded null => fail
+source number + decoded number => 进入 Float32 bit-exact 校验
 ```
 
-Float32 的 23 位尾数提供约 `log10(2^23) ≈ 6.92` 位十进制有效数字，因此对于绝对值较大的值（如 `hand_ev` 可达数十 BB），其最后一位十进制有效数字的精度约为 `value × 10^(-6.92)`，误差会随值的增大而增大。这解释了为何 9max:300BB 场景下 AA/raise 的 hand_ev（数值较大）会产生更大的误差。
+### 3.3 非有限数
 
-## 6. 相关文档
+正常 source DB 不应包含 `NaN`、`Infinity` 或 `-Infinity`。如果出现，校验应作为失败记录，而不是混入容差逻辑。
 
-- `docs/issues-and-action-items.md` — P2-5 Float32 精度差异
-- `docs/requirements-status-and-plan.md` — 方案对比与全量校验结果
-- `src/scheme1/cli/verify-binary.ts` — 校验工具实现
+## 4. 报告指标
+
+Cross verify 报告现在输出 `precision` 段，分别统计 `frequency` 和 `handEv`：
+
+- `checkedValues`：参与数值校验的数量
+- `nullValues`：null 值数量，仅 `handEv` 常见
+- `bitExactValues`：通过 bit-exact 校验的数量
+- `mismatchValues`：未通过 bit-exact 校验的数量
+- `maxQuantizationAbsError`：`abs(source - Math.fround(source))` 最大值
+- `maxQuantizationRelativeError`：相对量化误差最大值
+- `maxImplementationAbsError`：`abs(decoded - Math.fround(source))` 最大值
+- `p95QuantizationAbsError` / `p99QuantizationAbsError`：量化误差分位估计
+- `topQuantizationErrors`：量化误差最大的样本
+
+其中：
+
+```text
+quantization error = Float32 格式本身造成的不可避免损失
+implementation error = 实现额外引入的损失
+```
+
+验收目标：
+
+```text
+mismatchValues == 0
+maxImplementationAbsError == 0
+```
+
+`maxQuantizationAbsError` 可以大于 0，这是 Float32 本身的正常量化结果。
+
+## 5. 历史观测值
+
+旧版本文档曾使用固定阈值：
+
+| 字段 | 旧阈值 | 说明 |
+| --- | --- | --- |
+| `frequency` | `1e-6` | 历史全量最大误差约 `2.98e-8` |
+| `hand_ev` | `1e-5` | 历史发现约 70 条记录略超此阈值，最大约 `1.5258789e-5` |
+
+这些值现在只作为历史观测和业务感知参考，不再作为核心正确性标准。
+
+如果某个值的 Float32 量化误差超过旧阈值，但 decoded 精确等于 `Math.fround(source)`，则视为格式层正确，只在报告中记录量化误差。
+
+## 6. 后续扩展
+
+如果未来业务确认 Float32 量化误差仍不可接受，优先考虑：
+
+```text
+Float32 主存储 + 少量 exception delta 表
+```
+
+即：
+
+- 默认仍使用 Float32，保持当前体积优势。
+- 只对超过业务阈值的极少数记录额外保存修正值或 Float64。
+- 查询时先读 Float32，再按 exception 表覆盖。
+
+这比全量改为 Float64 更节省空间，也能把精度损失压到最小。
+
+## 7. 相关实现
+
+- `src/precision/float32.ts`：Float32 bit-exact 校验、bits 转换、量化误差统计
+- `src/scheme2/verify/checks/source-cross.ts`：source DB 与 Scheme2 产物的 bit-exact cross verify
+- `tests/float32-precision.test.ts`：Float32 精度工具测试
+- `tests/scheme2-verify.test.ts`：cross verify 精度边界测试

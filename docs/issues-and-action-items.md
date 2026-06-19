@@ -28,7 +28,7 @@
 
 ### 2. 测试覆盖率
 
-**现状（2026-06-20）：** 已有 112 个 Bun 测试，覆盖 scheme2 查询服务、构建续跑/manifest、verify、自检/交叉校验、pack 编解码、文件格式、CLI 参数解析边界值、native build script smoke test、benchmark 输出校验等。测试通过 `bun test` 和 pre-commit hook 运行。
+**现状（2026-06-20）：** 已有 119 个 Bun 测试，覆盖 scheme2 查询服务、构建续跑/manifest、verify、自检/交叉校验、pack 编解码、文件格式、CLI 参数解析边界值、native build script smoke test、benchmark 输出校验、Float32 bit-exact 精度校验等。测试通过 `bun test` 和 pre-commit hook 运行。
 
 **仍缺失的测试：**
 
@@ -62,16 +62,21 @@
 
 所有 9 个原文件中的本地定义已移除，改为从 `src/utils/` 导入。
 
-### 5. Float32 精度差异
+### 5. Float32 精度差异 ✅ **已解决 V1**
 
-**现状：** 全量验证发现 2380 万条记录中有 70 条 `hand_ev` 精度误差（最大差 0.000015），发生在 `default:9max:300BB AA/raise` 场景。
+**最终状态（2026-06-20）：** 已将固定容差策略升级为 Float32 bit-exact 策略。
 
-**影响：** 虽已通过验证（在容差范围内），但说明浮点数往返编码存在边界 case。
+新的硬标准是：`decoded` 必须等于 `Math.fround(source)`，并且 Float32 bit pattern 一致。这样只允许 IEEE754 Float32 正确舍入带来的不可避免量化损失，不允许编码、解码、字节序、Rust/JS 转换或验证逻辑引入额外损失。
 
-**建议：**
-1. 建立生产数据的浮点数容差规范文档
-2. 在验证流程中增加可配置的容差阈值参数
-3. 对超出容差的记录自动生成差异报告
+已补充：
+
+- `docs/float32-precision-spec.md`：Float32 bit-exact 精度策略
+- `src/precision/float32.ts`：Float32 bits、round-trip 校验、量化误差统计
+- `src/scheme2/verify/checks/source-cross.ts`：cross verify 使用 bit-exact 校验，并输出 `precision` 统计
+- `tests/float32-precision.test.ts`：精度工具测试
+- `tests/scheme2-verify.test.ts`：覆盖“旧容差会放过但 Float32 bit 不一致必须失败”的边界 case
+
+历史观测值仍保留为报告参考：全量验证曾发现 2380 万条记录中约 70 条 `hand_ev` 固定容差边界 case，最大量化误差约 `0.000015`，集中在 `default:9max:300BB AA/raise` 场景。
 
 ### 6. OS 冷启动测试缺失
 
@@ -94,5 +99,5 @@
   ↓
 已完成 P1: CLI 参数边界测试 + 代码去重 + Husky v10 兼容性
   ↓
-剩余 P2: Float32 精度文档 + OS 冷启动 benchmark
+剩余 P2: OS 冷启动 benchmark
 ```

@@ -87,6 +87,7 @@ export async function runCrossVerify(options: CrossVerifyOptions): Promise<Schem
   report.totals.checkedSourceRecords = crossResult.checkedRecords;
   report.totals.failedSourceRecords = crossResult.failedRecords;
   report.totals.extraBinaryRecords = crossResult.extraBinaryRecords;
+  report.precision = crossResult.precision;
 
   // Write reports
   if (options.outPath) {
