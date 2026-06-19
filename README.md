@@ -144,6 +144,12 @@ cd ..
 bun run check
 ```
 
+发布前建议在 Scheme2 输出目录已经生成后再跑更完整的检查：
+
+```powershell
+bun run check:release
+```
+
 ### 4. 快速体验一遍主流程
 
 先构建 Scheme2：
@@ -167,9 +173,11 @@ bun run query:scheme2 --dir range-db/binary-scheme2 --player-count 6 --depth-bb 
 | 命令 | 作用 |
 | --- | --- |
 | `bun test` | 运行 Bun 测试 |
+| `bun run test:native` | 运行 Rust 原生插件测试 |
 | `bun run typecheck` | TypeScript 类型检查 |
 | `bun run lint` | ESLint 静态检查 |
 | `bun run check` | 一次执行 typecheck + lint + test |
+| `bun run check:release` | 发布前检查：`check` + Rust 测试 + Scheme2 standalone CRC 自检 |
 
 推荐在改动构建、查询、Rust 热路径后至少跑一次：
 
@@ -215,6 +223,8 @@ bun run build:scheme2 --source range-db/range.db --out range-db/binary-scheme2 -
 ```powershell
 bun run build:scheme2 --source range-db/range.db --out range-db/binary-scheme2 --resume
 ```
+
+`--resume` 只适合同一个 source DB 的中断恢复。如果 SQLite 源库内容发生变化，命令会拒绝续跑；请改用 `--overwrite` 重新生成完整一致的数据版本。
 
 #### 只构建一个维度
 
@@ -335,7 +345,43 @@ bun run analyze
 
 ### 6. 校验脚本
 
-当前校验脚本是：
+#### Scheme2 主线校验
+
+当前主线校验脚本是：
+
+```powershell
+bun run verify:scheme2
+```
+
+默认 `standalone` 模式不依赖 source DB，会检查 `manifest.json`、`meta.db`、`.idx`、`.bin` 的结构和交叉引用。
+
+```powershell
+bun run verify:scheme2 `
+  --mode standalone `
+  --dir range-db/binary-scheme2 `
+  --verify-checksum `
+  --out reports/scheme2-verify-standalone.json `
+  --md reports/scheme2-verify-standalone.md
+```
+
+需要和旧 SQLite 源库做数据交叉校验时使用 `cross` 模式：
+
+```powershell
+bun run verify:scheme2 `
+  --mode cross `
+  --source range-db/range.db `
+  --dir range-db/binary-scheme2 `
+  --sample-size 10000 `
+  --verify-checksum `
+  --out reports/scheme2-verify-cross.json `
+  --md reports/scheme2-verify-cross.md
+```
+
+如果要逐行全量交叉校验，把 `--sample-size` 设为 `0`。
+
+#### Scheme1 旧校验
+
+旧校验脚本是：
 
 ```powershell
 bun run verify:binary

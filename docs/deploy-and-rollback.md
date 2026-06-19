@@ -54,7 +54,7 @@ bun run build:scheme2 \
   --stats-md reports/build-scheme2.md
 ```
 
-`--resume` 会读取已有的 `manifest.json`，跳过已完成的维度。中途失败的维度（`.tmp` 文件残留）也会被重新构建。
+`--resume` 会读取已有的 `manifest.json`，跳过已完成的维度。中途失败的维度（`.tmp` 文件残留）也会被重新构建。续跑时会比对当前 source DB checksum 和 manifest 中记录的 checksum；如果源库已变化，需要使用 `--overwrite` 从头生成一个一致的新版本。
 
 ## 3. 发布前校验流程
 
@@ -67,14 +67,14 @@ bun run build:scheme2 \
   --stats reports/build-scheme2.json \
   --stats-md reports/build-scheme2.md
 
-# 2. 质量检查
-bun run check
+# 2. 发布前质量检查
+bun run check:release
 
-# 3. Benchmark — 校验 Scheme2 查询链路可用并抽样比对结果
+# 3. Source DB 交叉校验（抽样；严格发布可把 --sample-size 设为 0 做全量）
+bun run verify:scheme2 --mode cross --source range-db/range.db --dir range-db/binary-scheme2 --sample-size 10000 --verify-checksum
+
+# 4. Benchmark — 校验 Scheme2 查询链路可用并抽样比对结果
 bun run benchmark:scheme2 --dir range-db/binary-scheme2 --iterations 1000 --verify-results
-
-# 4. 如需严格逐行校验，当前需要额外补一条 Scheme2 专用校验脚本
-#    现有 verify:binary 主要覆盖 Scheme1（依赖 range_pack_index_* 表）
 ```
 
 ### 校验通过标准
@@ -82,11 +82,13 @@ bun run benchmark:scheme2 --dir range-db/binary-scheme2 --iterations 1000 --veri
 | 检查项 | 标准 |
 |--------|------|
 | Build 统计 | 0 errors，压缩比 ≤ 30% |
-| 质量检查 | `bun run check` 全部通过 |
+| 质量检查 | `bun run check:release` 全部通过 |
+| Scheme2 standalone 校验 | manifest/meta/idx/bin/CRC 全部通过 |
+| Scheme2 cross 校验 | source records failed = 0，extra binary records = 0 |
 | Benchmark | p50 查询时间 ≤ 0.012ms，QPS ≥ 80K |
 | 结果抽样核对 | `benchmark:scheme2 --verify-results` 无 mismatch |
 
-如果后续补上 Scheme2 专用全量校验脚本，精度阈值建议继续参考 `docs/float32-precision-spec.md`。
+精度阈值参考 `docs/float32-precision-spec.md`。
 
 ## 4. 回滚流程
 
@@ -151,7 +153,8 @@ cp -r range-db/binary-scheme2-backup/* range-db/binary-scheme2/
 
 ```powershell
 # 对当前部署目录执行可用性检查与抽样结果核对
-bun run check
+bun run verify:scheme2 --mode standalone --dir range-db/binary-scheme2 --verify-checksum
+bun run verify:scheme2 --mode cross --source range-db/range.db --dir range-db/binary-scheme2 --sample-size 10000 --verify-checksum
 bun run benchmark:scheme2 --dir range-db/binary-scheme2 --verify-results
 ```
 
@@ -159,7 +162,7 @@ bun run benchmark:scheme2 --dir range-db/binary-scheme2 --verify-results
 
 1. 从独立备份恢复对应文件
 2. 如无备份，使用 `--resume` 重建受影响维度
-3. 重建后重新执行 `bun run check` 和 `bun run benchmark:scheme2 --verify-results`
+3. 重建后重新执行 `bun run check:release`、`bun run verify:scheme2 --mode cross --verify-checksum` 和 `bun run benchmark:scheme2 --verify-results`
 
 ## 6. 断点续跑实现细节
 
@@ -176,7 +179,7 @@ bun run benchmark:scheme2 --dir range-db/binary-scheme2 --verify-results
 
 ### 6.2 manifest.json 记录
 
-`manifest.json` 在每次成功构建后更新，包含已完成维度的列表。`--resume` 读取此列表跳过已完成维度。
+`manifest.json` 在每次成功构建后更新，包含已完成维度的列表和 `sourceDbChecksum`。`--resume` 读取此列表跳过已完成维度，但只允许在 source DB checksum 一致时续跑。
 
 ```powershell
 # 重新构建失败或新增的维度

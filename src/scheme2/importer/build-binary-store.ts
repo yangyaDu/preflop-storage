@@ -119,10 +119,6 @@ export async function buildBinaryStoreScheme2(options: BuildBinaryStoreSchema2Op
     }
   }
 
-  const sourceDb = new Database(options.sourceDbPath, { readonly: true });
-  const allDimensions = filterDimensions(discoverRangeDimensions(sourceDb), options.dimensions);
-  const strategies = uniqueStrategies(allDimensions);
-
   // Calculate source DB size
   let sourceDbSizeBytes = 0;
   try {
@@ -132,6 +128,13 @@ export async function buildBinaryStoreScheme2(options: BuildBinaryStoreSchema2Op
 
   // Compute source DB checksum
   const sourceDbChecksum = await computeFileSha256(options.sourceDbPath);
+  if (options.resume && previousManifest && !options.overwrite) {
+    assertResumeSourceChecksum(previousManifest, sourceDbChecksum);
+  }
+
+  const sourceDb = new Database(options.sourceDbPath, { readonly: true });
+  const allDimensions = filterDimensions(discoverRangeDimensions(sourceDb), options.dimensions);
+  const strategies = uniqueStrategies(allDimensions);
 
   // If overwrite is set, clean up previous output and ignore resume
   if (options.overwrite) {
@@ -149,6 +152,7 @@ export async function buildBinaryStoreScheme2(options: BuildBinaryStoreSchema2Op
     : allDimensions;
 
   const metaDb = new Database(metaPath);
+  let statements: BuildStatements | null = null;
 
   try {
     // Only init meta.db for fresh builds
@@ -156,7 +160,7 @@ export async function buildBinaryStoreScheme2(options: BuildBinaryStoreSchema2Op
       initLightMetaDb(metaDb, allDimensions);
     }
 
-    const statements = prepareBuildStatements(metaDb, allDimensions);
+    statements = prepareBuildStatements(metaDb, allDimensions);
     const schemaIdByKey = new Map<string, number>();
 
     // Copy metadata only on fresh build
@@ -323,6 +327,7 @@ export async function buildBinaryStoreScheme2(options: BuildBinaryStoreSchema2Op
 
     return report;
   } finally {
+    finalizeBuildStatements(statements);
     metaDb.close();
     sourceDb.close();
   }
@@ -339,6 +344,24 @@ async function readBuildManifest(manifestPath: string): Promise<BuildManifest | 
     return JSON.parse(await Bun.file(manifestPath).text()) as BuildManifest;
   } catch {
     return null;
+  }
+}
+
+function assertResumeSourceChecksum(previousManifest: BuildManifest, sourceDbChecksum: string): void {
+  const previousChecksum = previousManifest.sourceDbChecksum;
+  if (!previousChecksum || previousChecksum === "unknown" || sourceDbChecksum === "unknown") {
+    return;
+  }
+
+  if (previousChecksum !== sourceDbChecksum) {
+    throw new PreflopStoreError(
+      "BUILD_ERROR",
+      "Source DB checksum differs from manifest.json. Refusing --resume because completed dimensions may be stale. Pass --overwrite to rebuild from scratch.",
+      {
+        manifestChecksum: previousChecksum,
+        sourceDbChecksum,
+      },
+    );
   }
 }
 
@@ -475,6 +498,28 @@ function prepareBuildStatements(metaDb: Database, dimensions: RangeDimension[]):
     `),
     lastInsertId: metaDb.prepare("SELECT last_insert_rowid() AS id"),
   };
+}
+
+function finalizeBuildStatements(statements: BuildStatements | null): void {
+  if (!statements) return;
+
+  for (const statement of statements.insertDrillLineByStrategy.values()) {
+    safeFinalizeStatement(statement);
+  }
+  for (const statement of statements.insertConcreteLineByDimension.values()) {
+    safeFinalizeStatement(statement);
+  }
+  safeFinalizeStatement(statements.selectActionSchema);
+  safeFinalizeStatement(statements.insertActionSchema);
+  safeFinalizeStatement(statements.lastInsertId);
+}
+
+function safeFinalizeStatement(statement: ReturnType<Database["prepare"]>): void {
+  try {
+    statement.finalize();
+  } catch {
+    // Ignore finalization races; Database.close() is still the final cleanup boundary.
+  }
 }
 
 function copyDrillScenarioLines(params: {

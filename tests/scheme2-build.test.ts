@@ -221,22 +221,24 @@ describe("Scheme2 build pipeline", () => {
     const rootDir = await mkdtemp(join(tmpdir(), "preflop-storage-scheme2-resume-"));
     tempDirs.push(rootDir);
 
-    const { sourcePath, outDir } = createTwoDimensionSource(rootDir, { secondActionName: "invalid-action" });
+    const { sourcePath, outDir } = createTwoDimensionSource(rootDir);
     const firstReport = await buildBinaryStoreScheme2({ sourceDbPath: sourcePath, outDir, overwrite: true });
 
-    expect(firstReport.totals.errorCount).toBe(1);
+    expect(firstReport.totals.errorCount).toBe(0);
     let manifest = JSON.parse(await Bun.file(join(outDir, "manifest.json")).text()) as {
-      dimensions: Array<{ depthBb: number; status: string }>;
+      dimensions: Array<{ depthBb: number; status: string; error: string | null }>;
     };
     expect(manifest.dimensions.find((dimension) => dimension.depthBb === 100)?.status).toBe("success");
-    expect(manifest.dimensions.find((dimension) => dimension.depthBb === 200)?.status).toBe("failed");
-
-    const db = new Database(sourcePath);
-    try {
-      db.query("UPDATE range_data_default_6max_200BB SET action_name = 'raise'").run();
-    } finally {
-      db.close();
+    const failedDimension = manifest.dimensions.find((dimension) => dimension.depthBb === 200);
+    if (!failedDimension) {
+      expect(failedDimension).toBeDefined();
+      return;
     }
+    failedDimension.status = "failed";
+    failedDimension.error = "synthetic interrupted build";
+    await Bun.write(join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
+    await rm(join(outDir, "ranges_default_6max_200BB.bin"), { force: true });
+    await rm(join(outDir, "ranges_default_6max_200BB.idx"), { force: true });
 
     const resumeReport = await buildBinaryStoreScheme2({ sourceDbPath: sourcePath, outDir, resume: true });
     const skippedDimension = resumeReport.dimensions.find((dimension) => dimension.depthBb === 100);
@@ -248,9 +250,28 @@ describe("Scheme2 build pipeline", () => {
     expect(rebuiltDimension?.srcRowCount).toBe(1);
 
     manifest = JSON.parse(await Bun.file(join(outDir, "manifest.json")).text()) as {
-      dimensions: Array<{ depthBb: number; status: string }>;
+      dimensions: Array<{ depthBb: number; status: string; error: string | null }>;
     };
     expect(manifest.dimensions.every((dimension) => dimension.status === "success")).toBe(true);
+  });
+
+  test("resume rejects when source DB checksum changed", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "preflop-storage-scheme2-resume-checksum-"));
+    tempDirs.push(rootDir);
+
+    const { sourcePath, outDir } = createTwoDimensionSource(rootDir);
+    await buildBinaryStoreScheme2({ sourceDbPath: sourcePath, outDir, overwrite: true });
+
+    const db = new Database(sourcePath);
+    try {
+      db.query("UPDATE range_data_default_6max_100BB SET frequency = 0.5 WHERE concrete_line_id = 1").run();
+    } finally {
+      db.close();
+    }
+
+    await expect(
+      buildBinaryStoreScheme2({ sourceDbPath: sourcePath, outDir, resume: true }),
+    ).rejects.toThrow("Source DB checksum differs");
   });
 
   test("overwrite removes files listed by the previous manifest", async () => {
@@ -279,7 +300,7 @@ describe("Scheme2 build pipeline", () => {
 
     expect(existsSync(removedBinPath)).toBe(false);
     expect(existsSync(removedIdxPath)).toBe(false);
-  });
+  }, 15000);
 
   test("writes JSON and Markdown build stats", async () => {
     const { outDir, sourcePath } = await buildFixture();

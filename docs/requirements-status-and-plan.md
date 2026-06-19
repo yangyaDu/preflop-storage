@@ -1,6 +1,6 @@
 # 项目进度与状态
 
-最后更新：2026-06-17
+最后更新：2026-06-19
 
 这份文档只记录当前已经落地的能力、最近完成的变更，以及下一步还需要继续补强的点。历史方案推演和早期计划已经不再作为主线，当前默认推荐使用 **Scheme2 + Rust**。
 
@@ -17,6 +17,7 @@
 
 - 构建：`bun run build:scheme2`
 - 查询：`bun run query:scheme2`
+- 校验：`bun run verify:scheme2`
 - 压测：`bun run benchmark:scheme2`
 
 ## 当前进度总览
@@ -64,16 +65,18 @@
 - `manifest.json` 记录每个维度的状态：`success` / `failed`
 - `--resume` 只跳过真正构建成功且产物完整的维度
 - 恢复时会校验 `.bin` / `.idx` 是否存在，以及文件大小是否与 manifest 对得上
+- `--resume` 会比对当前 source DB checksum 和 manifest 中记录的 checksum；源库变化时会拒绝续跑，要求使用 `--overwrite` 重新构建
 - `--overwrite` 会清理上一次构建遗留的 `meta.db`、manifest、维度文件和 `.tmp` 文件
 - 单维度构建失败时不会把临时文件误当成成功产物
 
-这次修复的重点是避免“上次失败的维度在 resume 时被误判为已完成”。
+这次修复的重点是避免“上次失败的维度在 resume 时被误判为已完成”，以及避免“旧成功维度被复用到新 source DB”。
 
 ### 2. Scheme2 构建测试补齐
 
 新增并通过了以下关键测试：
 
 - `resume skips successful dimensions and rebuilds failed dimensions`
+- `resume rejects when source DB checksum changed`
 - `overwrite removes files listed by the previous manifest`
 - `writes JSON and Markdown build stats`
 
@@ -86,7 +89,8 @@
 - `bun run typecheck` 通过
 - `bun run lint` 通过
 - `bun test` 通过
-- 总计 `88` 个测试通过
+- `cargo test --manifest-path native-addon/Cargo.toml` 通过
+- 总计 `102` 个 Bun 测试通过，`17` 个 Rust 测试通过
 
 ## 当前产物与能力
 
@@ -150,19 +154,23 @@ binary-scheme2/
 
 ## 还需要继续补强的点
 
-### 1. Scheme2 的独立校验命令
+### 1. 运行时错误语义进一步收束
 
-当前 `verify:binary` 主要围绕 Scheme1 的 `range_pack_index_*` 表工作，后续最好补一条直接针对 Scheme2 的校验入口，避免发布前还要依赖旧链路做间接验证。
+Rust 热路径启用 CRC 校验后，如果 pack 损坏，目前更偏向返回查询 miss。后续建议把 checksum mismatch、越界索引等数据损坏场景映射成明确的结构化错误，便于生产告警和自动恢复。
 
-### 2. 文档进一步收束
+### 2. Native addon 发布流水线
 
-部分历史文档仍带有“方案探索期”的描述，后续可以继续把文档口径统一到以下主线：
+当前已有 `test:native` 和发布前检查脚本，但 native addon 的跨平台构建/产物分发还主要依赖手工执行 `bunx @napi-rs/cli build --platform --release`。后续建议把 native 构建纳入 CI 或发布脚本。
+
+### 3. 文档进一步收束
+
+大部分主线文档已经切到 Scheme2 + Rust，但部分历史测试说明仍带有旧路径。后续可以继续把文档口径统一到以下主线：
 
 - 当前推荐方案是 Scheme2 + Rust
 - Scheme1 只保留给兼容、回归和对比测试
 - benchmark 聚合脚本与 README 需要持续保持同一口径
 
-### 3. 发布前验证闭环
+### 4. 发布前验证闭环
 
 当前已经具备：
 
@@ -170,12 +178,13 @@ binary-scheme2/
 - 部署/回滚说明
 - benchmark 报告
 - 测试覆盖
+- Scheme2 standalone / cross 校验
+- `check:release` 发布前检查脚本
 
 后续还建议补强：
 
-- Scheme2 专用全量校验
-- 针对真实生产目录的发布前检查脚本
 - manifest 版本升级策略说明
+- 冷启动和 OS page cache benchmark 的固定发布阈值
 
 ## 建议的日常使用顺序
 
@@ -197,7 +206,10 @@ bun run check
 # 5. 构建 Scheme2 数据
 bun run build:scheme2 --source range-db/range.db --out range-db/binary-scheme2 --overwrite
 
-# 6. 查询验证
+# 6. 发布前额外检查：Bun + Rust + Scheme2 standalone 自检
+bun run check:release
+
+# 7. 查询验证
 bun run query:scheme2 --dir range-db/binary-scheme2 --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand AA
 ```
 

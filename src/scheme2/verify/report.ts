@@ -88,7 +88,7 @@ export function createReport(
   extra?: Partial<Pick<Scheme2VerifyReport["totals"], "checkedSourceRecords" | "failedSourceRecords" | "extraBinaryRecords">>,
 ): Scheme2VerifyReport {
   const structuralFailures = failures.filter((f) => f.layer !== "source-cross");
-  const sourceCrossFailures = failures.filter((f) => f.layer === "source-cross");
+  const idxBinCrossFailures = failures.filter((f) => f.layer === "idx-bin-cross");
 
   const failedIdxs = new Set<string>();
   const failedBins = new Set<string>();
@@ -134,7 +134,7 @@ export function createReport(
       idxFilesFailed,
       binFilesOk,
       binFilesFailed,
-      idxBinCrossFailures: sourceCrossFailures.length,
+      idxBinCrossFailures: idxBinCrossFailures.length,
       ...extra,
     },
     dimensions,

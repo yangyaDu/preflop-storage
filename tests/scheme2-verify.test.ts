@@ -46,13 +46,15 @@ async function buildFixture(
       );
     `);
 
-    db.query("INSERT INTO concrete_lines_default_6max_100BB(id, abstract_line, concrete_line) VALUES (1, 'R-C', 'R2-C')").run();
+    db.query(
+      "INSERT INTO concrete_lines_default_6max_100BB(id, abstract_line, concrete_line) VALUES (1, 'R-C', 'R2-C'), (2, 'R-C', 'R3-C')",
+    ).run();
     db.query("INSERT INTO drill_scenario_lines_default(drill_name, abstract_line, player_count, depth) VALUES ('fixture', 'R-C', 6, 0)").run();
     db.query(
       "INSERT INTO range_data_default_6max_100BB(concrete_line_id, hole_cards, action_name, action_size, amount_bb, frequency, hand_ev) VALUES (1, 'AA', 'fold', 0, 0, 1, 0)",
     ).run();
     db.query(
-      "INSERT INTO range_data_default_6max_100BB(concrete_line_id, hole_cards, action_name, action_size, amount_bb, frequency, hand_ev) VALUES (1, 'AKs', ?, 40, 2, 0.5, 5)",
+      "INSERT INTO range_data_default_6max_100BB(concrete_line_id, hole_cards, action_name, action_size, amount_bb, frequency, hand_ev) VALUES (2, 'AKs', ?, 40, 2, 0.5, 5)",
     ).run(secondActionName);
   } finally {
     db.close();
@@ -186,17 +188,27 @@ describe("Scheme2 standalone verify", () => {
     expect(report.failures.some((f) => f.reason === "CHECKSUM_MISMATCH" && f.layer === "meta-db")).toBe(true);
   });
 
+  test("counts idx-bin cross-reference failures in totals", async () => {
+    const { outDir } = await buildFixture();
+    const idxPath = join(outDir, "ranges_default_6max_100BB.idx");
+    const raw = readFileSync(idxPath);
+
+    // First record byteLength lives at header(16) + record field offset(14).
+    raw.writeUInt32LE(1, 16 + 14);
+    writeFileSync(idxPath, raw);
+
+    const report = await runStandaloneVerify({ dir: outDir, verifyChecksums: false });
+    expect(report.failures.some((f) => f.layer === "idx-bin-cross" && f.reason === "PACK_SIZE_MISMATCH")).toBe(true);
+    expect(report.totals.idxBinCrossFailures).toBeGreaterThan(0);
+  });
+
   test("reports idx out-of-order as failure", async () => {
-    // Need a fixture with at least 2 concrete_line_ids for idx ordering check
     const { outDir } = await buildFixture({ secondActionName: "raise" });
 
     const idxPath = join(outDir, "ranges_default_6max_100BB.idx");
     const raw = new Uint8Array(readFileSync(idxPath).buffer);
-    // Skip if fixture has fewer than 2 records (single concrete_line_id)
-    if (raw.byteLength < 16 + 2 * 22) {
-      console.log("Skipping: fixture only has 1 idx record");
-      return;
-    }
+    expect(raw.byteLength).toBeGreaterThanOrEqual(16 + 2 * 22);
+
     // Swap records 0 and 1 in the concreteLineId fields
     const rec0Off = 16;
     const rec1Off = 16 + 22;

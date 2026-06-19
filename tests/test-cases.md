@@ -7,9 +7,9 @@
 主要测试对象：
 
 - `src/binary/`：二进制 header、action schema、range pack、CRC32C。
-- `src/importer/`：旧 SQLite 到 `meta.db + ranges_*.bin` 的构建流程。
-- `src/query/`：基于二进制文件的策略读取服务。
-- `src/cli/`：构建命令和查询命令。
+- `src/scheme2/importer/`：旧 SQLite 到 `meta.db + .idx + .bin` 的主构建流程。
+- `src/scheme2/query/`：Scheme2 + Rust 热路径查询服务。
+- `src/scheme2/cli/`：Scheme2 构建、查询、校验和 benchmark 命令。
 
 ## 测试环境
 
@@ -52,17 +52,18 @@ bun test
 执行命令：
 
 ```powershell
-bun run src/cli/build-binary.ts --source range-db/range.db --out range-db/binary-smoke --dimension default:6:100 --max-packs 3 --overwrite
+bun run build:scheme2 --source range-db/range.db --out range-db/binary-smoke --dimension default:6:100 --max-packs 3 --overwrite
 ```
 
 预期结果：
 
 - 命令正常结束。
-- 输出 `binary build completed`。
+- 输出 `scheme2 binary build completed`。
 - `range-db/binary-smoke/` 下生成：
 
 ```text
 meta.db
+ranges_default_6max_100BB.idx
 ranges_default_6max_100BB.bin
 ```
 
@@ -118,6 +119,28 @@ bun run check
 - ESLint 检查通过。
 - Bun 单元测试通过。
 
+## 用例 2.4：运行发布前检查
+
+测试目标：
+
+验证 Bun 质量检查、Rust 原生插件测试和 Scheme2 standalone 自检可以形成发布前检查闭环。
+
+前置条件：
+
+已构建 `range-db/binary-scheme2`。
+
+执行命令：
+
+```powershell
+bun run check:release
+```
+
+预期结果：
+
+- TypeScript、ESLint、Bun 测试通过。
+- Rust `cargo test` 通过。
+- Scheme2 standalone + CRC 校验通过。
+
 ## 用例 3：查询单手牌策略
 
 测试目标：
@@ -131,7 +154,7 @@ bun run check
 执行命令：
 
 ```powershell
-bun run src/cli/query-hand.ts --dir range-db/binary-smoke --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand 22
+bun run query:scheme2 --dir range-db/binary-smoke --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand 22
 ```
 
 预期结果：
@@ -150,7 +173,7 @@ bun run src/cli/query-hand.ts --dir range-db/binary-smoke --player-count 6 --dep
 执行命令：
 
 ```powershell
-bun run src/cli/query-hand.ts --dir range-db/binary-smoke --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand 22 --verify-checksum
+bun run query:scheme2 --dir range-db/binary-smoke --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand 22 --verify-checksum
 ```
 
 预期结果：
@@ -167,13 +190,13 @@ bun run src/cli/query-hand.ts --dir range-db/binary-smoke --player-count 6 --dep
 执行命令：
 
 ```powershell
-bun run src/cli/build-binary.ts --source range-db/range.db --out range-db/binary-test-8max --dimension default_8max_100BB --max-packs 2 --overwrite
+bun run build:scheme2 --source range-db/range.db --out range-db/binary-test-8max --dimension default_8max_100BB --max-packs 2 --overwrite
 ```
 
 预期结果：
 
-- 只生成 `ranges_default_8max_100BB.bin`。
-- 不应生成其他维度的 `ranges_*.bin` 文件。
+- 只生成 `ranges_default_8max_100BB.idx` 和 `ranges_default_8max_100BB.bin`。
+- 不应生成其他维度的 `ranges_*.idx` / `ranges_*.bin` 文件。
 
 ## 用例 6：重复构建时覆盖输出
 
@@ -184,13 +207,13 @@ bun run src/cli/build-binary.ts --source range-db/range.db --out range-db/binary
 执行命令：
 
 ```powershell
-bun run src/cli/build-binary.ts --source range-db/range.db --out range-db/binary-smoke --dimension default:6:100 --max-packs 3 --overwrite
+bun run build:scheme2 --source range-db/range.db --out range-db/binary-smoke --dimension default:6:100 --max-packs 3 --overwrite
 ```
 
 预期结果：
 
 - 命令正常完成。
-- 旧的 `meta.db` 和 `ranges_default_6max_100BB.bin` 被重新生成。
+- 旧的 `meta.db`、`ranges_default_6max_100BB.idx` 和 `ranges_default_6max_100BB.bin` 被重新生成。
 
 ## 用例 7：重复构建时不允许覆盖
 
@@ -201,7 +224,7 @@ bun run src/cli/build-binary.ts --source range-db/range.db --out range-db/binary
 执行命令：
 
 ```powershell
-bun run src/cli/build-binary.ts --source range-db/range.db --out range-db/binary-smoke --dimension default:6:100 --max-packs 3
+bun run build:scheme2 --source range-db/range.db --out range-db/binary-smoke --dimension default:6:100 --max-packs 3
 ```
 
 预期结果：
@@ -218,7 +241,7 @@ bun run src/cli/build-binary.ts --source range-db/range.db --out range-db/binary
 执行命令：
 
 ```powershell
-bun run src/cli/query-hand.ts --dir range-db/binary-smoke --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand XX
+bun run query:scheme2 --dir range-db/binary-smoke --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand XX
 ```
 
 预期结果：
@@ -235,7 +258,7 @@ bun run src/cli/query-hand.ts --dir range-db/binary-smoke --player-count 6 --dep
 执行命令：
 
 ```powershell
-bun run src/cli/query-hand.ts --dir range-db/binary-smoke --player-count 6 --depth-bb 100 --concrete-line-id 999999999 --hand 22
+bun run query:scheme2 --dir range-db/binary-smoke --player-count 6 --depth-bb 100 --concrete-line-id 999999999 --hand 22
 ```
 
 预期结果：
@@ -248,18 +271,18 @@ null
 
 测试目标：
 
-验证 `meta.db` 存在但 `ranges_*.bin` 缺失时，查询会报出文件读取错误。
+验证 `meta.db` 存在但 `ranges_*.idx` / `ranges_*.bin` 缺失时，查询会报出文件读取错误。
 
 操作步骤：
 
 1. 复制 `range-db/binary-smoke/meta.db` 到临时目录。
-2. 不复制 `ranges_default_6max_100BB.bin`。
+2. 不复制 `ranges_default_6max_100BB.idx` 和 `ranges_default_6max_100BB.bin`。
 3. 执行查询命令。
 
 执行命令示例：
 
 ```powershell
-bun run src/cli/query-hand.ts --dir range-db/binary-missing-bin --meta range-db/binary-missing-bin/meta.db --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand 22
+bun run query:scheme2 --dir range-db/binary-missing-bin --meta range-db/binary-missing-bin/meta.db --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand 22
 ```
 
 预期结果：
@@ -271,14 +294,14 @@ bun run src/cli/query-hand.ts --dir range-db/binary-missing-bin --meta range-db/
 
 测试目标：
 
-验证 `PreflopQueryService.getHandsByAction()` 不传 `actionNames` 时可以返回 pack 中所有手牌。
+验证 `Scheme2QueryService.getHandsByAction()` 不传 `actionNames` 时可以返回 pack 中所有手牌。
 
 示例代码：
 
 ```ts
-import { PreflopQueryService } from "../src/query/preflop-query-service";
+import { Scheme2QueryService } from "../src/scheme2/query/query-service";
 
-const service = new PreflopQueryService("range-db/binary-smoke/meta.db", "range-db/binary-smoke");
+const service = new Scheme2QueryService("range-db/binary-smoke/meta.db", "range-db/binary-smoke");
 
 const result = await service.getHandsByAction({
   strategy: "default",
@@ -364,13 +387,13 @@ abs(old_hand_ev - new_hand_ev) <= 1e-5
 执行命令：
 
 ```powershell
-bun run src/cli/build-binary.ts --source range-db/range.db --out range-db/binary --overwrite
+bun run build:scheme2 --source range-db/range.db --out range-db/binary-scheme2 --overwrite
 ```
 
 预期结果：
 
 - 生成 `meta.db`。
-- 生成所有维度的 `ranges_*.bin`。
+- 生成所有维度的 `ranges_*.idx` 和 `ranges_*.bin`。
 - 查询任意已存在维度时可以正常返回策略。
 
 ## 建议自动化优先级
