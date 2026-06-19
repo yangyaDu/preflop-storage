@@ -46,7 +46,8 @@
       "Bash(sh:*)",
       "Bash(git check-ignore *)",
       "Bash(rtk gain:*)",
-      "Bash(bun test:*)"
+      "Bash(bun test:*)",
+      "Bash(git rm:*)"
     ]
   }
 }
