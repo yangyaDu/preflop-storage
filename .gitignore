@@ -39,6 +39,9 @@ temp/
 *.tmp
 *.bak
 
+# Generated reports (benchmark / analysis / verify)
+reports/
+
 # Native addon (Rust/napi-rs) build artifacts
 native-addon/target/
 native-addon/*.node
