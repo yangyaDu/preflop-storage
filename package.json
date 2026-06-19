@@ -6,6 +6,11 @@
   "scripts": {
     "build:binary": "bun run src/scheme1/cli/build-binary.ts",
     "build:scheme2": "bun run src/scheme2/cli/build-binary.ts",
+    "build:native": "bun run scripts/build-native.ts",
+    "build:native:win": "bun run scripts/build-native.ts --target x86_64-pc-windows-msvc",
+    "build:native:linux": "bun run scripts/build-native.ts --target x86_64-unknown-linux-gnu",
+    "build:native:mac:arm64": "bun run scripts/build-native.ts --target aarch64-apple-darwin",
+    "build:native:mac:x64": "bun run scripts/build-native.ts --target x86_64-apple-darwin",
     "query:hand": "bun run src/scheme1/cli/query-hand.ts",
     "query:scheme2": "bun run src/scheme2/cli/query-hand.ts",
     "analyze:sqlite": "bun run src/scheme1/cli/analyze-sqlite.ts",
@@ -22,10 +27,11 @@
     "test": "bun test",
     "fmt:native:check": "cargo fmt --manifest-path native-addon/Cargo.toml --check",
     "test:native": "cargo test --manifest-path native-addon/Cargo.toml",
+    "check:native": "bun run fmt:native:check && bun run test:native",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "check": "bun run typecheck && bun run lint && bun test",
-    "check:release": "bun run check && bun run fmt:native:check && bun run test:native && bun run verify:scheme2 --mode standalone --verify-checksum",
+    "check:release": "bun run check && bun run check:native && bun run verify:scheme2 --mode standalone --verify-checksum",
     "prepare": "husky"
   },
   "devDependencies": {

@@ -108,35 +108,28 @@ bun install
 
 ### 2. 构建 Rust 原生插件
 
-进入 `native-addon/`：
+V1 构建流程以 Windows 本机为优先支持环境，`bun run build:native` 会自动选择当前平台 target。Windows x64 会固定使用 MSVC target，避免默认落到 GNU target 后出现 `libnode.dll not found`。
 
 ```powershell
-cd native-addon
+bun run build:native
 ```
 
-先跑 Rust 测试：
+也可以显式指定平台：
 
 ```powershell
-cargo test
+bun run build:native:win
+bun run build:native:linux
+bun run build:native:mac:arm64
+bun run build:native:mac:x64
 ```
 
-再构建 `napi-rs` 模块：
+构建完成后再跑 native 检查：
 
 ```powershell
-bunx @napi-rs/cli build --platform --release
+bun run check:native
 ```
 
-Windows 如果需要显式指定目标三元组，可以用：
-
-```powershell
-bunx @napi-rs/cli build --platform --release --target x86_64-pc-windows-msvc
-```
-
-构建完成后回到项目根目录：
-
-```powershell
-cd ..
-```
+更完整的平台矩阵和排错说明见 `docs/native-addon-build.md`。
 
 ### 3. 运行基础检查
 
@@ -172,12 +165,15 @@ bun run query:scheme2 --dir range-db/binary-scheme2 --player-count 6 --depth-bb 
 
 | 命令 | 作用 |
 | --- | --- |
+| `bun run build:native` | 按当前平台构建 Rust native addon；Windows x64 固定 MSVC target |
 | `bun test` | 运行 Bun 测试 |
+| `bun run fmt:native:check` | 运行 Rust formatter 检查 |
 | `bun run test:native` | 运行 Rust 原生插件测试 |
+| `bun run check:native` | 一次执行 Rust formatter 检查 + Rust 测试 |
 | `bun run typecheck` | TypeScript 类型检查 |
 | `bun run lint` | ESLint 静态检查 |
 | `bun run check` | 一次执行 typecheck + lint + test |
-| `bun run check:release` | 发布前检查：`check` + Rust 测试 + Scheme2 standalone CRC 自检 |
+| `bun run check:release` | 发布前检查：`check` + `check:native` + Scheme2 standalone CRC 自检 |
 
 推荐在改动构建、查询、Rust 热路径后至少跑一次：
 
@@ -537,6 +533,7 @@ service.close();
 | --- | --- |
 | `docs/requirements-status-and-plan.md` | 当前进度和状态 |
 | `docs/query-sdk.md` | 查询 SDK 说明 |
+| `docs/native-addon-build.md` | Rust native addon 多平台构建说明 |
 | `docs/deploy-and-rollback.md` | 部署、发布和回滚 |
 | `docs/float32-precision-spec.md` | 精度与误差标准 |
 | `docs/error-handling-strategy.md` | 错误处理策略 |

@@ -3,7 +3,7 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["node_modules/**", "range-db/**"],
+    ignores: ["node_modules/**", "range-db/**", "native-addon/index.js", "native-addon/index.d.ts", "native-addon/target/**"],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

@@ -28,17 +28,19 @@
 
 ### 2. 测试覆盖率
 
-**现状（2026-06-16）：** 已有 75 个 Bun 测试（4 个测试文件），覆盖 scheme2 查询服务、pack 编解码、文件格式、CLI 参数解析边界值等。测试通过 `bun test` 和 pre-commit hook 运行。
+**现状（2026-06-20）：** 已有 112 个 Bun 测试，覆盖 scheme2 查询服务、构建续跑/manifest、verify、自检/交叉校验、pack 编解码、文件格式、CLI 参数解析边界值、native build script smoke test、benchmark 输出校验等。测试通过 `bun test` 和 pre-commit hook 运行。
 
 **仍缺失的测试：**
 
 | 优先级 | 测试对象 | 说明 |
 |---|---|---|
-| 中 | 构建管线 smoke test | Scheme2 builder 的正确性 |
-| 低 | Benchmark 输出校验 | 确保 benchmark 不会静默失败 |
+| 低 | OS 冷启动 benchmark 自动化测试 | 平台相关，需避免拖慢常规测试 |
 
 **已补充：**
 - ✅ CLI 参数解析边界测试（`tests/cli-args.test.ts`，50 个用例，覆盖 parseCliArgs/getStringArg/getNumberArg/getBooleanArg/getNumberListArg/getRepeatedStringArgs）
+- ✅ Scheme2 构建管线测试（`tests/scheme2-build.test.ts`，覆盖 build、resume、overwrite、manifest、stats、查询错误语义）
+- ✅ Native build script smoke test（`tests/native-build-script.test.ts`，覆盖 target 列表、dry-run、`--` 分隔符和不支持 target）
+- ✅ Benchmark 输出校验（`tests/benchmark-output.test.ts`，覆盖 Scheme2 benchmark JSON/Markdown 输出、`--verify-results` note、错误计数和非 0 退出码）
 
 ---
 
@@ -92,5 +94,5 @@
   ↓
 已完成 P1: CLI 参数边界测试 + 代码去重 + Husky v10 兼容性
   ↓
-剩余 P2: 构建管线 smoke test + Float32 精度文档 + OS 冷启动 benchmark + 错误风格统一
+剩余 P2: Float32 精度文档 + OS 冷启动 benchmark
 ```

@@ -67,21 +67,27 @@ bun run build:scheme2 \
   --stats reports/build-scheme2.json \
   --stats-md reports/build-scheme2.md
 
-# 2. 发布前质量检查
+# 2. 构建当前平台 native addon
+bun run build:native
+
+# 3. 发布前质量检查
 bun run check:release
 
-# 3. Source DB 交叉校验（抽样；严格发布可把 --sample-size 设为 0 做全量）
+# 4. Source DB 交叉校验（抽样；严格发布可把 --sample-size 设为 0 做全量）
 bun run verify:scheme2 --mode cross --source range-db/range.db --dir range-db/binary-scheme2 --sample-size 10000 --verify-checksum
 
-# 4. Benchmark — 校验 Scheme2 查询链路可用并抽样比对结果
+# 5. Benchmark — 校验 Scheme2 查询链路可用并抽样比对结果
 bun run benchmark:scheme2 --dir range-db/binary-scheme2 --iterations 1000 --verify-results
 ```
+
+V1 native addon 构建流程以 Windows 本机为优先支持环境：Windows x64 使用 `x86_64-pc-windows-msvc`，不要使用默认 GNU target。Linux x64 GNU 和 macOS arm64/x64 已保留脚本 target，实际发布前应在对应平台本机执行 `bun run build:native` 与 `bun run check:native`。
 
 ### 校验通过标准
 
 | 检查项 | 标准 |
 |--------|------|
 | Build 统计 | 0 errors，压缩比 ≤ 30% |
+| Native addon | 当前平台 `bun run build:native` 成功，`bun run check:native` 通过 |
 | 质量检查 | `bun run check:release` 全部通过 |
 | Scheme2 standalone 校验 | manifest/meta/idx/bin/CRC 全部通过 |
 | Scheme2 cross 校验 | source records failed = 0，extra binary records = 0 |
