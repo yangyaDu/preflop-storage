@@ -8,6 +8,7 @@ import { buildBinaryStoreScheme2 } from "../src/scheme2/importer/build-binary-st
 import { Scheme2QueryService } from "../src/scheme2/query/query-service";
 import { decodeFileHeader, assertSupportedHeader, RANGE_FILE_HEADER_SIZE } from "../src/binary/file-header";
 import { decodeIdxHeader, assertIdxHeader } from "../src/scheme2/idx/idx-types";
+import { PreflopQueryError } from "../src/query/errors";
 
 const tempDirs: string[] = [];
 
@@ -61,6 +62,119 @@ describe("Scheme2 build pipeline", () => {
         holeCards: "AA",
       });
       expect(strategy).not.toBeNull();
+    } finally {
+      service.close();
+    }
+  });
+
+  test("corrupted .bin throws CHECKSUM_MISMATCH when checksums are enabled", async () => {
+    const { outDir } = await buildFixture();
+    const binPath = join(outDir, "ranges_default_6max_100BB.bin");
+    await mutateFile(binPath, (bytes) => {
+      bytes[RANGE_FILE_HEADER_SIZE] ^= 0xff;
+    });
+
+    const service = new Scheme2QueryService(join(outDir, "meta.db"), outDir, {
+      verifyChecksums: true,
+    });
+
+    try {
+      service.prewarmDimension({ playerCount: 6, depthBb: 100 });
+      expectSyncQueryErrorCode(
+        () =>
+          service.getHandStrategySync({
+            playerCount: 6,
+            depthBb: 100,
+            concreteLineId: 1,
+            holeCards: "AA",
+          }),
+        "CHECKSUM_MISMATCH",
+      );
+    } finally {
+      service.close();
+    }
+  });
+
+  test("batch query reports checksum failures without masking invalid hands", async () => {
+    const { outDir } = await buildFixture();
+    const binPath = join(outDir, "ranges_default_6max_100BB.bin");
+    await mutateFile(binPath, (bytes) => {
+      bytes[RANGE_FILE_HEADER_SIZE] ^= 0xff;
+    });
+
+    const service = new Scheme2QueryService(join(outDir, "meta.db"), outDir, {
+      verifyChecksums: true,
+    });
+
+    try {
+      service.prewarmDimension({ playerCount: 6, depthBb: 100 });
+      const batch = service.getHandStrategiesBatchSync({
+        playerCount: 6,
+        depthBb: 100,
+        requests: [
+          { concreteLineId: 1, holeCards: "AA" },
+          { concreteLineId: 1, holeCards: "XX" },
+        ],
+      });
+
+      expect(batch[0].strategy).toBeNull();
+      expect(batch[0].error?.code).toBe("CHECKSUM_MISMATCH");
+      expect(batch[1].strategy).toBeNull();
+      expect(batch[1].error?.code).toBe("UNKNOWN_HAND");
+    } finally {
+      service.close();
+    }
+  });
+
+  test("corrupted .idx pack range throws INVALID_FORMAT instead of panicking", async () => {
+    const { outDir } = await buildFixture();
+    const idxPath = join(outDir, "ranges_default_6max_100BB.idx");
+    await mutateFile(idxPath, (bytes) => {
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      view.setUint32(16 + 10, RANGE_FILE_HEADER_SIZE - 1, true);
+    });
+
+    const service = new Scheme2QueryService(join(outDir, "meta.db"), outDir, {
+      verifyChecksums: true,
+    });
+
+    try {
+      service.prewarmDimension({ playerCount: 6, depthBb: 100 });
+      expectSyncQueryErrorCode(
+        () =>
+          service.getHandStrategySync({
+            playerCount: 6,
+            depthBb: 100,
+            concreteLineId: 1,
+            holeCards: "AA",
+          }),
+        "INVALID_FORMAT",
+      );
+    } finally {
+      service.close();
+    }
+  });
+
+  test("async cold query preserves BIN_FILE_NOT_FOUND for missing binary files", async () => {
+    const { outDir } = await buildFixture();
+    await rm(join(outDir, "ranges_default_6max_100BB.bin"), { force: true });
+    const service = new Scheme2QueryService(join(outDir, "meta.db"), outDir);
+
+    try {
+      let caught: unknown;
+      try {
+        await service.getHandStrategy({
+          playerCount: 6,
+          depthBb: 100,
+          concreteLineId: 1,
+          holeCards: "AA",
+        });
+      } catch (error) {
+        caught = error;
+      }
+
+      expect(caught).toBeInstanceOf(PreflopQueryError);
+      expect((caught as PreflopQueryError).code).toBe("BIN_FILE_NOT_FOUND");
     } finally {
       service.close();
     }
@@ -465,6 +579,24 @@ async function buildFixture(): Promise<{ outDir: string; sourcePath: string }> {
   });
 
   return { outDir, sourcePath };
+}
+
+async function mutateFile(path: string, mutate: (bytes: Uint8Array) => void): Promise<void> {
+  const bytes = new Uint8Array(await Bun.file(path).arrayBuffer());
+  mutate(bytes);
+  await Bun.write(path, bytes);
+}
+
+function expectSyncQueryErrorCode(fn: () => unknown, code: PreflopQueryError["code"]): void {
+  let caught: unknown;
+  try {
+    fn();
+  } catch (error) {
+    caught = error;
+  }
+
+  expect(caught).toBeInstanceOf(PreflopQueryError);
+  expect((caught as PreflopQueryError).code).toBe(code);
 }
 
 async function removeTempDirWithRetry(dir: string): Promise<void> {

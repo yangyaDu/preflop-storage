@@ -12,7 +12,7 @@ Error
 │   code: "INVALID_FORMAT" | "INVALID_ARGUMENT" | "IO_ERROR" | "BUILD_ERROR" | "UNSUPPORTED_DATA_VERSION"
 │
 ├── PreflopQueryError     —— 查询服务层错误
-│   code: "UNKNOWN_HAND" | "PACK_NOT_FOUND" | "ACTION_SCHEMA_NOT_FOUND" | "BIN_FILE_NOT_FOUND" | "CHECKSUM_MISMATCH" | "UNSUPPORTED_DATA_VERSION"
+│   code: "UNKNOWN_HAND" | "PACK_NOT_FOUND" | "ACTION_SCHEMA_NOT_FOUND" | "BIN_FILE_NOT_FOUND" | "INVALID_FORMAT" | "CHECKSUM_MISMATCH" | "UNSUPPORTED_DATA_VERSION"
 │
 └── Error                 —— 内部不变式违反（编程错误，不应在生产环境出现）
 ```
@@ -78,9 +78,11 @@ if (actionMasks.length !== handCount) {
 | `PACK_NOT_FOUND` | 找不到对应 concrete line 的 range pack | concreteLineId 无效 |
 | `ACTION_SCHEMA_NOT_FOUND` | 缺失 action schema | meta.db 数据不完整 |
 | `BIN_FILE_NOT_FOUND` | .idx/.bin 文件不存在 | 维度未预热或文件缺失 |
+| `INVALID_FORMAT` | .idx/.bin 内容不符合格式约束 | idx offset/length 越界、pack 长度非法 |
 | `CHECKSUM_MISMATCH` | CRC32C 校验失败 | 数据损坏 |
 | `UNSUPPORTED_DATA_VERSION` | PFSP 版本不兼容 | 旧版数据文件 |
 
 ## 5. 变更记录
 
 - 2026-06-17：统一各层错误类型。二进制/构建层改用 `PreflopStoreError`，查询层保持 `PreflopQueryError`。内部不变式保留 `Error`。
+- 2026-06-19：Scheme2 Rust 热路径将 checksum mismatch、idx/bin 格式损坏映射为查询层结构化错误；查询错误码新增 `INVALID_FORMAT`。

@@ -37,22 +37,50 @@ impl BinReader {
         // Validate header
         Self::validate_header(&mmap)?;
 
-        Ok(Self {
-            _file: file,
-            mmap,
-        })
+        Ok(Self { _file: file, mmap })
     }
 
     /// Return a view of the pack data at `offset..offset + byte_length`.
     ///
     /// `offset` must be >= PFSP_HEADER_SIZE (the data starts after the header).
     #[inline]
-    pub fn read_pack(&self, offset: u32, byte_length: u32) -> &[u8] {
+    pub fn read_pack(&self, offset: u32, byte_length: u32) -> io::Result<&[u8]> {
         let start = offset as usize;
-        let end = start + byte_length as usize;
-        &self.mmap[start..end]
-    }
+        let len = byte_length as usize;
+        let end = start.checked_add(len).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "Invalid pack range: offset {} + byte length {} overflows",
+                    offset, byte_length
+                ),
+            )
+        })?;
 
+        if start < PFSP_HEADER_SIZE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "Invalid pack offset: {}, expected >= {}",
+                    offset, PFSP_HEADER_SIZE
+                ),
+            ));
+        }
+
+        if end > self.mmap.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "Pack range out of bounds: offset {}, byte length {}, file length {}",
+                    offset,
+                    byte_length,
+                    self.mmap.len()
+                ),
+            ));
+        }
+
+        Ok(&self.mmap[start..end])
+    }
 }
 
 impl BinReader {
@@ -193,9 +221,37 @@ mod tests {
         write_test_bin(&path, Some(&extra));
 
         let reader = BinReader::open(&path).unwrap();
-        let pack = reader.read_pack(PFSP_HEADER_SIZE as u32, 100);
+        let pack = reader.read_pack(PFSP_HEADER_SIZE as u32, 100).unwrap();
         assert_eq!(pack.len(), 100);
         assert_eq!(pack[0], 0x42);
         drop(reader);
+    }
+
+    #[test]
+    fn test_read_pack_rejects_header_offset() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("test.bin");
+        let extra = vec![0x42u8; 100];
+        write_test_bin(&path, Some(&extra));
+
+        let reader = BinReader::open(&path).unwrap();
+        let err = reader
+            .read_pack((PFSP_HEADER_SIZE - 1) as u32, 1)
+            .unwrap_err();
+        assert!(err.to_string().contains("Invalid pack offset"));
+    }
+
+    #[test]
+    fn test_read_pack_rejects_out_of_bounds_range() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("test.bin");
+        let extra = vec![0x42u8; 100];
+        write_test_bin(&path, Some(&extra));
+
+        let reader = BinReader::open(&path).unwrap();
+        let err = reader
+            .read_pack(PFSP_HEADER_SIZE as u32 + 50, 100)
+            .unwrap_err();
+        assert!(err.to_string().contains("Pack range out of bounds"));
     }
 }

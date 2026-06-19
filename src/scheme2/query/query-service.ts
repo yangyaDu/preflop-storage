@@ -5,7 +5,13 @@ import { assertCrc32c } from "../../binary/crc32c";
 import { RangeBinFileReader } from "../../binary/range-bin-file-reader";
 import { decodeRangePackForHand, decodeRangePackMaskMatch } from "../../binary/range-pack-codec";
 import { getHandCode, getHandId } from "../../hand/hand-dict";
-import { PreflopQueryError, PreflopStoreError, toPreflopQueryErrorInfo, type PreflopQueryErrorInfo } from "../../query/errors";
+import {
+  PreflopQueryError,
+  PreflopStoreError,
+  toPreflopQueryError,
+  toPreflopQueryErrorInfo,
+  type PreflopQueryErrorInfo,
+} from "../../query/errors";
 import {
   getBinFileName,
   getConcreteLinesTableName,
@@ -157,14 +163,10 @@ export class Scheme2QueryService {
       this.evictLRU();
       this.prewarmActionSchemasForDimension(handle);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      if (msg.includes("ENOENT") || msg.includes("No such file")) {
-        throw new PreflopQueryError("BIN_FILE_NOT_FOUND", `Index or binary file not found`, {
-          idxFileName,
-          binFileName,
-        });
-      }
-      throw error;
+      throw toPreflopQueryError(error, "BIN_FILE_NOT_FOUND", {
+        idxFileName,
+        binFileName,
+      });
     }
   }
 
@@ -235,7 +237,7 @@ export class Scheme2QueryService {
     try {
       this.prewarmDimension(params);
     } catch (error) {
-      throw new PreflopQueryError("PACK_NOT_FOUND", error instanceof Error ? error.message : String(error), {
+      throw toPreflopQueryError(error, "PACK_NOT_FOUND", {
         strategy,
         playerCount: params.playerCount,
         depthBb: params.depthBb,
@@ -298,7 +300,11 @@ export class Scheme2QueryService {
       return params.requests.map((request) => ({
         ...request,
         strategy: null,
-        error: toPreflopQueryErrorInfo(error),
+        error: toPreflopQueryErrorInfo(error, "BIN_FILE_NOT_FOUND", {
+          strategy,
+          playerCount,
+          depthBb,
+        }),
       }));
     }
 
@@ -365,7 +371,16 @@ export class Scheme2QueryService {
       rustRequests.push({ concreteLineId: req.concreteLineId, handId });
     }
 
-    const counts = handle.queryBatchCount(rustRequests);
+    let counts: Array<number | null | undefined>;
+    try {
+      counts = handle.queryBatchCount(rustRequests, this.options.verifyChecksums ?? false);
+    } catch (error) {
+      throw toPreflopQueryError(error, "INVALID_FORMAT", {
+        strategy,
+        playerCount: params.playerCount,
+        depthBb: params.depthBb,
+      });
+    }
     let total = 0;
     for (const count of counts) {
       if (count != null) total += count;
@@ -574,8 +589,25 @@ export class Scheme2QueryService {
       }
     }
 
-    const flatBuffer = handle.queryBatchFlat(rustRequests, this.options.verifyChecksums ?? false);
-    return this.parseFlatBatchResult(flatBuffer as unknown as Buffer, requests, requestIndexes, invalidHandErrors);
+    try {
+      const flatBuffer = handle.queryBatchFlat(rustRequests, this.options.verifyChecksums ?? false);
+      return this.parseFlatBatchResult(flatBuffer as unknown as Buffer, requests, requestIndexes, invalidHandErrors);
+    } catch (error) {
+      return this.toBatchFatalErrorResults(requests, invalidHandErrors, error);
+    }
+  }
+
+  private toBatchFatalErrorResults(
+    requests: BatchHandStrategyRequest[],
+    invalidHandErrors: Map<number, PreflopQueryErrorInfo>,
+    error: unknown,
+  ): BatchHandStrategyResult[] {
+    const fatalError = toPreflopQueryErrorInfo(error, "INVALID_FORMAT");
+    return requests.map((request, index) => ({
+      ...request,
+      strategy: null,
+      error: invalidHandErrors.get(index) ?? fatalError,
+    }));
   }
 
   /**
@@ -699,12 +731,19 @@ export class Scheme2QueryService {
     handle: DimensionHandle,
   ): HandStrategy | null {
     const handId = this.getKnownHandId(holeCards);
-    const fragment = handle.query(concreteLineId, handId, this.options.verifyChecksums);
+    try {
+      const fragment = handle.query(concreteLineId, handId, this.options.verifyChecksums);
 
-    if (!fragment) return null;
+      if (!fragment) return null;
 
-    const actions = this.getActionSchema(fragment.actionSchemaId);
-    return this.assembleHandStrategy(holeCards, fragment, actions);
+      const actions = this.getActionSchema(fragment.actionSchemaId);
+      return this.assembleHandStrategy(holeCards, fragment, actions);
+    } catch (error) {
+      throw toPreflopQueryError(error, "INVALID_FORMAT", {
+        concreteLineId,
+        holeCards,
+      });
+    }
   }
 
   private assembleHandStrategy(

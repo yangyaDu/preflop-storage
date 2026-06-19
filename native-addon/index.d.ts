@@ -67,7 +67,7 @@ export declare class DimensionHandle {
    * DecodedCellResult objects across the napi boundary.
    * Returns `null` for a request if the concreteLineId/handId is not found.
    */
-  queryBatchCount(requests: Array<BatchQueryRequest>): Array<number | undefined | null>
+  queryBatchCount(requests: Array<BatchQueryRequest>, verifyChecksum?: boolean | undefined | null): Array<number | undefined | null>
 }
 
 /** A single request in a batch query. */

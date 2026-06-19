@@ -10,6 +10,7 @@ mod idx_reader;
 mod pack_codec;
 mod types;
 
+use std::io;
 use std::path::Path;
 
 use napi_derive::napi;
@@ -17,7 +18,7 @@ use napi_derive::napi;
 use crate::bin_reader::BinReader;
 use crate::crc32c::assert_crc32c;
 use crate::idx_reader::IdxReader;
-use crate::pack_codec::{action_count_from_pack, decode_pack_for_hand};
+use crate::pack_codec::{action_count_from_pack, decode_pack_for_hand, pack_byte_length};
 use crate::types::{BatchQueryRequest, DecodedCellResult, IdxRecord, PackDecodeResult};
 
 /// A dimension handle that combines .idx and .bin file access.
@@ -38,19 +39,11 @@ impl DimensionHandle {
     /// Throws a JS Error on invalid paths or unsupported formats.
     #[napi(constructor)]
     pub fn new(idx_path: String, bin_path: String) -> napi::Result<Self> {
-        let idx = IdxReader::open(Path::new(&idx_path)).map_err(|e| {
-            napi::Error::from_reason(format!(
-                "Failed to open .idx file '{}': {}",
-                idx_path, e
-            ))
-        })?;
+        let idx = IdxReader::open(Path::new(&idx_path))
+            .map_err(|e| native_open_error(".idx", &idx_path, e))?;
 
-        let bin = BinReader::open(Path::new(&bin_path)).map_err(|e| {
-            napi::Error::from_reason(format!(
-                "Failed to open .bin file '{}': {}",
-                bin_path, e
-            ))
-        })?;
+        let bin = BinReader::open(Path::new(&bin_path))
+            .map_err(|e| native_open_error(".bin", &bin_path, e))?;
 
         Ok(Self { idx, bin })
     }
@@ -72,7 +65,7 @@ impl DimensionHandle {
         concrete_line_id: u32,
         hand_id: u32,
         verify_checksum: Option<bool>,
-    ) -> Option<PackDecodeResult> {
+    ) -> napi::Result<Option<PackDecodeResult>> {
         let verify = verify_checksum.unwrap_or(false);
         self.query_inner(concrete_line_id, hand_id as u8, verify)
     }
@@ -87,7 +80,7 @@ impl DimensionHandle {
         &self,
         requests: Vec<BatchQueryRequest>,
         verify_checksum: Option<bool>,
-    ) -> Vec<Option<PackDecodeResult>> {
+    ) -> napi::Result<Vec<Option<PackDecodeResult>>> {
         let verify = verify_checksum.unwrap_or(false);
         requests
             .into_iter()
@@ -128,7 +121,7 @@ impl DimensionHandle {
         &self,
         requests: Vec<BatchQueryRequest>,
         verify_checksum: Option<bool>,
-    ) -> Vec<u8> {
+    ) -> napi::Result<Vec<u8>> {
         let verify = verify_checksum.unwrap_or(false);
         let n = requests.len();
 
@@ -138,7 +131,7 @@ impl DimensionHandle {
         let mut hit_count: u32 = 0;
 
         for req in &requests {
-            match self.query_inner(req.concrete_line_id, req.hand_id as u8, verify) {
+            match self.query_inner(req.concrete_line_id, req.hand_id as u8, verify)? {
                 Some(result) => {
                     let cc = result.cells.len() as u16;
                     metas.push((cc, result.action_schema_id));
@@ -188,7 +181,7 @@ impl DimensionHandle {
             cursor += 8;
         }
 
-        buf
+        Ok(buf)
     }
 
     /// Lightweight batch: return only action cell counts per request.
@@ -200,12 +193,14 @@ impl DimensionHandle {
     pub fn query_batch_count(
         &self,
         requests: Vec<BatchQueryRequest>,
-    ) -> Vec<Option<u32>> {
+        verify_checksum: Option<bool>,
+    ) -> napi::Result<Vec<Option<u32>>> {
+        let verify = verify_checksum.unwrap_or(false);
         requests
             .into_iter()
             .map(|req| {
-                self.query_inner(req.concrete_line_id, req.hand_id as u8, false)
-                    .map(|result| result.cells.len() as u32)
+                self.query_inner(req.concrete_line_id, req.hand_id as u8, verify)
+                    .map(|result| result.map(|result| result.cells.len() as u32))
             })
             .collect()
     }
@@ -218,36 +213,95 @@ impl DimensionHandle {
         concrete_line_id: u32,
         hand_id: u8,
         verify_checksum: bool,
-    ) -> Option<PackDecodeResult> {
+    ) -> napi::Result<Option<PackDecodeResult>> {
         // Step 1: binary search in .idx
-        let record: IdxRecord = self.idx.find(concrete_line_id)?;
+        let record: IdxRecord = match self.idx.find(concrete_line_id) {
+            Some(record) => record,
+            None => return Ok(None),
+        };
+
+        if record.hand_count == 0 {
+            return Err(native_invalid_format(format!(
+                "Invalid .idx record for concrete_line_id {}: hand_count must be > 0",
+                concrete_line_id
+            )));
+        }
 
         // Step 2: read pack data from .bin (zero-copy slice of mmap)
-        let pack = self.bin.read_pack(record.offset, record.byte_length);
+        let pack = self
+            .bin
+            .read_pack(record.offset, record.byte_length)
+            .map_err(|e| {
+                native_invalid_format(format!(
+                    "Invalid .bin pack range for concrete_line_id {}: {}",
+                    concrete_line_id, e
+                ))
+            })?;
+
+        let action_count = action_count_from_pack(record.hand_count, record.byte_length);
+        let expected_len = pack_byte_length(record.hand_count, action_count);
+        if expected_len != record.byte_length {
+            return Err(native_invalid_format(format!(
+                "Invalid pack length for concrete_line_id {}: byte_length {} is incompatible with hand_count {}",
+                concrete_line_id, record.byte_length, record.hand_count
+            )));
+        }
+        if action_count > 32 {
+            return Err(native_invalid_format(format!(
+                "Invalid pack action count for concrete_line_id {}: {}, expected <= 32",
+                concrete_line_id, action_count
+            )));
+        }
 
         // Step 3: optional CRC32C checksum verification
         if verify_checksum {
-            if assert_crc32c(pack, record.checksum).is_err() {
-                // In production, we could return an error, but to match the
-                // existing JS API (which returns null on error), we return None.
-                // The caller can opt into verification separately.
-                return None;
-            }
+            assert_crc32c(pack, record.checksum).map_err(|reason| {
+                native_checksum_mismatch(format!(
+                    "{}; concrete_line_id {}, expected_checksum {}",
+                    reason, concrete_line_id, record.checksum
+                ))
+            })?;
         }
 
         // Step 4: compute action_count from pack dimensions
-        let action_count = action_count_from_pack(record.hand_count, record.byte_length);
 
         // Step 5: decode cells for the target hand_id
         let cells = decode_pack_for_hand(pack, record.hand_count, action_count, hand_id);
 
         if cells.is_empty() {
-            return None;
+            return Ok(None);
         }
 
-        Some(PackDecodeResult {
+        Ok(Some(PackDecodeResult {
             action_schema_id: record.action_schema_id,
             cells,
-        })
+        }))
     }
+}
+
+fn native_open_error(kind: &str, path: &str, error: io::Error) -> napi::Error {
+    let message = error.to_string();
+    let code = match error.kind() {
+        io::ErrorKind::NotFound => "PFS_BIN_FILE_NOT_FOUND",
+        io::ErrorKind::InvalidData
+            if message.contains("Unsupported") && message.contains("version") =>
+        {
+            "PFS_UNSUPPORTED_DATA_VERSION"
+        }
+        io::ErrorKind::InvalidData => "PFS_INVALID_FORMAT",
+        _ => "PFS_IO_ERROR",
+    };
+
+    napi::Error::from_reason(format!(
+        "{}: Failed to open {} file '{}': {}",
+        code, kind, path, message
+    ))
+}
+
+fn native_invalid_format(message: String) -> napi::Error {
+    napi::Error::from_reason(format!("PFS_INVALID_FORMAT: {}", message))
+}
+
+fn native_checksum_mismatch(message: String) -> napi::Error {
+    napi::Error::from_reason(format!("PFS_CHECKSUM_MISMATCH: {}", message))
 }

@@ -20,11 +20,12 @@
     "benchmark:compare": "bun run src/scheme1/cli/benchmark-compare.ts",
     "benchmark": "bun run benchmark:sqlite && bun run benchmark:binary && bun run benchmark:compare",
     "test": "bun test",
+    "fmt:native:check": "cargo fmt --manifest-path native-addon/Cargo.toml --check",
     "test:native": "cargo test --manifest-path native-addon/Cargo.toml",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "check": "bun run typecheck && bun run lint && bun test",
-    "check:release": "bun run check && bun run test:native && bun run verify:scheme2 --mode standalone --verify-checksum",
+    "check:release": "bun run check && bun run fmt:native:check && bun run test:native && bun run verify:scheme2 --mode standalone --verify-checksum",
     "prepare": "husky"
   },
   "devDependencies": {

@@ -91,7 +91,11 @@ pub fn decode_pack_for_hand(
         result.push(DecodedCellResult {
             action_id: action_id as u32,
             frequency: freq as f64,
-            hand_ev: if ev_raw.is_nan() { None } else { Some(ev_raw as f64) },
+            hand_ev: if ev_raw.is_nan() {
+                None
+            } else {
+                Some(ev_raw as f64)
+            },
         });
     }
 
@@ -219,10 +223,7 @@ mod tests {
         assert_eq!(action_count_from_pack(100, 500), 0); // 500/100-5=0, /8=0
         assert_eq!(action_count_from_pack(100, 1300), 1); // 1300/100-5=8, /8=1
         assert_eq!(action_count_from_pack(169, 845), 0); // too small
-        assert_eq!(
-            action_count_from_pack(169, (169 * (5 + 10 * 8)) as u32),
-            10
-        );
+        assert_eq!(action_count_from_pack(169, (169 * (5 + 10 * 8)) as u32), 10);
     }
 
     #[test]

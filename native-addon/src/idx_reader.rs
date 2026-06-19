@@ -190,7 +190,11 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    fn make_test_idx(dir: &std::path::Path, name: &str, records: &[IdxRecord]) -> std::path::PathBuf {
+    fn make_test_idx(
+        dir: &std::path::Path,
+        name: &str,
+        records: &[IdxRecord],
+    ) -> std::path::PathBuf {
         let path = dir.join(name);
         let mut f = File::create(&path).unwrap();
 

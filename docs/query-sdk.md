@@ -200,6 +200,7 @@ interface ActionResult {
 | `PACK_NOT_FOUND` | range pack 中找不到对应 concrete line |
 | `ACTION_SCHEMA_NOT_FOUND` | `action_schemas` 缺失对应 schema |
 | `BIN_FILE_NOT_FOUND` | 维度对应的 `.idx` / `.bin` 不存在或不可读 |
+| `INVALID_FORMAT` | `.idx` / `.bin` 内容不符合格式约束 |
 | `CHECKSUM_MISMATCH` | CRC32C 校验失败 |
 | `UNSUPPORTED_DATA_VERSION` | 文件头不是当前支持的 PFSP v1 |
 
