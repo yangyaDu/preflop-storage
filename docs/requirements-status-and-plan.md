@@ -32,11 +32,32 @@
 | 分析报告 | 已完成 | SQLite 分析、存储分析、benchmark 报告已落盘到 `reports/` |
 | 查询 SDK 文档 | 已完成 | 见 `docs/query-sdk.md` |
 | 部署/回滚文档 | 已完成 | 见 `docs/deploy-and-rollback.md` |
-| 自动化全量校验（Scheme2 专用） | 仍待补强 | 现有 `verify:binary` 主要覆盖 Scheme1 路径 |
+| 自动化全量校验（Scheme2 专用） | 已完成 | `verify:scheme2` 支持 standalone 自检 + cross 交叉校验 |
 
 ## 最近完成的变更
 
-### 1. Scheme2 构建恢复语义补齐
+### 1. Scheme2 全量校验命令（新增）
+
+新增 `bun run verify:scheme2` 命令，提供两条校验链路：
+
+- **standalone 模式（默认）**：不依赖 source DB，对 `manifest.json`、`meta.db`、`.idx`、`.bin` 做文件存在性、格式魔数、CRC32C 完整性、引用交叉校验。适合生产部署前自检。
+- **cross 模式**：叠加 source DB（`range.db`）交叉校验，对每条记录的 frequency/handEV 做逐行对比（采样 + 全量），复用了 Scheme1 的容差策略。
+
+相关代码：
+- `src/scheme2/cli/verify-binary.ts` — CLI 入口
+- `src/scheme2/verify/checks/manifest.ts` — manifest.json 自检
+- `src/scheme2/verify/checks/meta-db.ts` — meta.db 自检（action_schema checksum、schema_key）
+- `src/scheme2/verify/checks/idx-structure.ts` — .idx 魔数、版本、记录排序
+- `src/scheme2/verify/checks/bin-structure.ts` — .bin 魔数、版本
+- `src/scheme2/verify/checks/idx-bin-cross.ts` — .idx ↔ .bin 交叉引用 + CRC32C + pack 结构
+- `src/scheme2/verify/checks/source-cross.ts` — source DB 交叉数据校验
+- `src/scheme2/verify/report.ts` — JSON/Markdown 报告生成
+- `tests/scheme2-verify.test.ts` — 12 个测试用例
+
+验证结果（针对 range-db/binary-scheme2，9 维度，521K packs）：
+- standalone：全部通过
+- standalone + CRC：521K packs CRC32C 校验全部通过
+- cross（采样 500 条）：0 失败
 
 `src/scheme2/importer/build-binary-store.ts` 现在已经补上下面几件事：
 

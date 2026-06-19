@@ -1,0 +1,109 @@
+import {
+  getBooleanArg,
+  getNumberArg,
+  getStringArg,
+  parseCliArgs,
+} from "../../cli/args";
+import { runStandaloneVerify } from "../verify/standalone";
+import { runCrossVerify } from "../verify/cross";
+
+type VerifyMode = "standalone" | "cross";
+
+function parseMode(value: string): VerifyMode {
+  if (value === "standalone" || value === "cross") return value;
+  throw new Error(`Invalid --mode value: ${value}. Use standalone or cross.`);
+}
+
+const args = parseCliArgs(Bun.argv.slice(2));
+
+const mode = parseMode(getStringArg(args, "mode", "standalone"));
+const dir = getStringArg(args, "dir", "range-db/binary-scheme2");
+const sourceDbPath = mode === "cross" ? getStringArg(args, "source", "range-db/range.db") : undefined;
+const verifyChecksums = getBooleanArg(args, "verify-checksum");
+const sampleSize = getNumberArg(args, "sample-size", mode === "cross" ? 10000 : 0);
+const maxFailures = getNumberArg(args, "max-failures", 50);
+
+const outPath = getStringArg(
+  args,
+  "out",
+  mode === "cross"
+    ? `reports/scheme2-verify-cross.json`
+    : `reports/scheme2-verify-standalone.json`,
+);
+const mdPath = getStringArg(
+  args,
+  "md",
+  mode === "cross"
+    ? `reports/scheme2-verify-cross.md`
+    : `reports/scheme2-verify-standalone.md`,
+);
+
+async function main() {
+  if (mode === "standalone") {
+    const report = await runStandaloneVerify({
+      dir,
+      verifyChecksums,
+      outPath,
+      mdPath,
+    });
+
+    console.log(`Scheme2 standalone verification complete.`);
+    console.log(`  Dimensions: ${report.totals.dimensions}`);
+    console.log(`  Manifest OK: ${report.totals.manifestOk}`);
+    console.log(`  Meta DB OK: ${report.totals.metaDbOk}`);
+    console.log(`  Idx files OK: ${report.totals.idxFilesOk}/${report.totals.idxFilesOk + report.totals.idxFilesFailed}`);
+    console.log(`  Bin files OK: ${report.totals.binFilesOk}/${report.totals.binFilesOk + report.totals.binFilesFailed}`);
+    console.log(`  Idx-Bin cross failures: ${report.totals.idxBinCrossFailures}`);
+    console.log(`  Total failures: ${report.failures.length}`);
+
+    const hasFailure =
+      !report.totals.manifestOk ||
+      !report.totals.metaDbOk ||
+      report.totals.idxFilesFailed > 0 ||
+      report.totals.binFilesFailed > 0 ||
+      report.totals.idxBinCrossFailures > 0;
+
+    if (hasFailure) {
+      process.exitCode = 1;
+    }
+  } else {
+    if (!sourceDbPath) {
+      throw new Error("--source is required for cross mode");
+    }
+
+    const report = await runCrossVerify({
+      dir,
+      sourceDbPath,
+      sampleSize,
+      maxFailures,
+      verifyChecksums,
+      outPath,
+      mdPath,
+    });
+
+    console.log(`Scheme2 cross verification complete.`);
+    console.log(`  Dimensions: ${report.totals.dimensions}`);
+    console.log(`  Manifest OK: ${report.totals.manifestOk}`);
+    console.log(`  Meta DB OK: ${report.totals.metaDbOk}`);
+    console.log(`  Idx files OK: ${report.totals.idxFilesOk}/${report.totals.idxFilesOk + report.totals.idxFilesFailed}`);
+    console.log(`  Source records checked: ${report.totals.checkedSourceRecords ?? "N/A"}`);
+    console.log(`  Source records failed: ${report.totals.failedSourceRecords ?? "N/A"}`);
+    console.log(`  Extra binary records: ${report.totals.extraBinaryRecords ?? "N/A"}`);
+    console.log(`  Total failures: ${report.failures.length}`);
+
+    const hasFailure =
+      !report.totals.manifestOk ||
+      !report.totals.metaDbOk ||
+      report.totals.idxFilesFailed > 0 ||
+      report.totals.binFilesFailed > 0 ||
+      (report.totals.failedSourceRecords ?? 0) > 0 ||
+      (report.totals.extraBinaryRecords ?? 0) > 0;
+
+    if (hasFailure) {
+      process.exitCode = 1;
+    }
+  }
+}
+
+// Top-level await
+await main();

@@ -12,6 +12,7 @@
     "analyze:binary": "bun run src/scheme1/cli/analyze-binary.ts",
     "analyze": "bun run analyze:sqlite && bun run analyze:binary --sqlite-report reports/sqlite-analysis.json --md reports/storage-analysis.md",
     "verify:binary": "bun run src/scheme1/cli/verify-binary.ts",
+    "verify:scheme2": "bun run src/scheme2/cli/verify-binary.ts",
     "benchmark:sqlite": "bun run src/scheme1/cli/benchmark-sqlite.ts",
     "benchmark:binary": "bun run src/scheme1/cli/benchmark-binary.ts",
     "benchmark:scheme2": "bun run src/scheme2/cli/benchmark-binary.ts",
