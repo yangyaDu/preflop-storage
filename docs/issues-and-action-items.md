@@ -1,7 +1,7 @@
 # 项目问题清单与行动计划
 
 > 生成日期：2026-06-12
-> 更新日期：2026-06-20（brooks-health 四维度代码健康审查）
+> 更新日期：2026-06-20（brooks-health 四维度代码健康审查 + OS 冷启动 Benchmark V2）
 > 基于项目全量代码审查结果
 
 ---
@@ -29,14 +29,14 @@
 
 ### 2. 测试覆盖率
 
-**现状（2026-06-20）：** 已有 121 个 Bun 测试，覆盖 scheme2 查询服务、构建续跑/manifest、verify、自检/交叉校验、pack 编解码、文件格式、CLI 参数解析边界值、native build script smoke test、benchmark 输出校验、Float32 bit-exact 精度校验、OS 冷启动 benchmark 输出等。测试通过 `bun test` 和 pre-commit hook 运行。
+**现状（2026-06-20）：** 已有 122 个 Bun 测试，覆盖 scheme2 查询服务、构建续跑/manifest、verify、自检/交叉校验、pack 编解码、文件格式、CLI 参数解析边界值、native build script smoke test、benchmark 输出校验、Float32 bit-exact 精度校验、OS 冷启动 benchmark 输出等。测试通过 `bun test` 和 pre-commit hook 运行。
 
 **已补充：**
 - ✅ CLI 参数解析边界测试（`tests/cli-args.test.ts`，50 个用例，覆盖 parseCliArgs/getStringArg/getNumberArg/getBooleanArg/getNumberListArg/getRepeatedStringArgs）
 - ✅ Scheme2 构建管线测试（`tests/scheme2-build.test.ts`，覆盖 build、resume、overwrite、manifest、stats、查询错误语义）
 - ✅ Native build script smoke test（`tests/native-build-script.test.ts`，覆盖 target 列表、dry-run、`--` 分隔符和不支持 target）
 - ✅ Benchmark 输出校验（`tests/benchmark-output.test.ts`，覆盖 Scheme2 benchmark JSON/Markdown 输出、`--verify-results` note、错误计数和非 0 退出码）
-- ✅ OS 冷启动 benchmark 输出校验（`tests/cold-start-benchmark.test.ts`，覆盖默认全成功维度、维度过滤、runs alias、固定查询口径、JSON/Markdown 输出）
+- ✅ OS 冷启动 benchmark 输出校验（`tests/cold-start-benchmark.test.ts`，覆盖默认全成功维度、维度过滤、runs alias、固定查询口径、JSON/Markdown 输出、**失败隔离**：删除 `.bin` 后验证 latency 聚合仅使用成功 run）
 
 ---
 
@@ -74,26 +74,34 @@
 
 历史观测值仍保留为报告参考：全量验证曾发现 2380 万条记录中约 70 条 `hand_ev` 固定容差边界 case，最大量化误差约 `0.000015`，集中在 `default:9max:300BB AA/raise` 场景。
 
-### 6. OS 冷启动 Benchmark ✅ **已解决 V1**
+### 6. OS 冷启动 Benchmark ✅ **已解决 V2**
 
-**最终状态（2026-06-20）：** 已新增 `bun run benchmark:scheme2:cold` 和自动化测试。
+**最终状态（2026-06-20）：** 已新增 `bun run benchmark:scheme2:cold` 和自动化测试（3 个用例）。
 
-已补充：
+V1 基础能力：
 
 - `src/scheme2/cli/benchmark-cold-start.ts`：父进程入口，默认读取 manifest 全部成功维度；生产产物应覆盖 9 个维度。
-- `src/scheme2/cli/benchmark-cold-worker.ts`：单次 fresh process worker，测量打开 `meta.db/.idx/.bin` 到首次查询完成。
-- `tests/cold-start-benchmark.test.ts`：用轻量 2 维度 fixture 固化“默认不漏成功维度”的行为，避免常规测试拖慢。
-- `package.json`：新增 `benchmark:scheme2:cold`。
+- `src/scheme2/cli/benchmark-cold-worker.ts`：单次 fresh process worker。
+- `tests/cold-start-benchmark.test.ts`：2 维度 fixture 测试。
+- `package.json`：`benchmark:scheme2:cold`。
+
+V2 改进（grilling review 后）：
+
+- 重命名 `openAndFirstQueryMs` → `storeOpenAndFirstQueryMs`（三层口径：processElapsed / workerTotal / storeOpenAndFirstQuery）
+- 失败 run 隔离：仅成功 run 参与 latency 聚合；新增 `successCount`、`failures[]` 字段；`--fail-fast`、`--max-errors-per-dimension` 韧性控制
+- Phase accounting：校验 `phaseSumMs - workerTotalMs`，输出 `unaccountedMs` / `unaccountedRatio`
+- `os-best-effort` 非零确定性 filler（XOR 0xAA），语义降级为 cache perturbation
+- `--query-policy first|fixed`，roadmap：round-robin、random、stratified
+- 父进程 RSS 采样（`aggregate.parentRssSamples`）
+- 新增失败隔离测试：删除 `.bin` 文件后验证该维度 latency 聚合为空、健康维度不受影响
 
 推荐 9 维度运行：
 
 ```powershell
-bun run benchmark:scheme2:cold --source range-db/range.db --dir range-db/binary-scheme2 --runs 10 --concrete-line-id 1 --hand AA --mode process-cold
+bun run benchmark:scheme2:cold --source range-db/range.db --dir range-db/binary-scheme2 --runs 10 --query-policy fixed --concrete-line-id 1 --hand AA --mode process-cold
 ```
 
-当前本机基线（2026-06-20）：9 个维度、90 runs、0 errors；aggregate open+first-query p50 / p95 为 `340.36 ms / 2822.17 ms`，aggregate process elapsed p50 / p95 为 `518.28 ms / 3023.35 ms`。阶段拆分显示主要瓶颈是 `Dimension prewarm(idx/bin mmap + schema preload)`，p50 / p95 为 `338.85 ms / 2820.40 ms`；首查 decode p50 / p95 仅 `0.46 ms / 0.70 ms`。报告见 `reports/benchmark-cold-start.md`。
-
-边界：V1 的 `process-cold` 是 fresh process 冷启动，不清理 OS page cache；`os-best-effort` 和 `linux-drop-cache` 已保留，但严格物理冷缓存阈值仍需在发布环境上定义。
+当前本机基线（2026-06-20）：9 个维度、90 runs、0 errors；aggregate store open+first-query p50 / p95 为 `340.36 ms / 2822.17 ms`，aggregate process elapsed p50 / p95 为 `518.28 ms / 3023.35 ms`。阶段拆分显示主要瓶颈是 `Dimension prewarm`，p50 / p95 为 `338.85 ms / 2820.40 ms`；首查 decode p50 / p95 仅 `0.46 ms / 0.70 ms`。Phase accounting 一致性：90 runs 最大 `unaccountedMs` 0.185ms。报告见 `reports/benchmark-cold-start.md`。
 
 ### 7. 错误处理风格不一致
 
@@ -266,7 +274,7 @@ import { Scheme2QueryService } from "../src/scheme2/query/query-service";
 ```
 已完成 P0: 性能优化（Scheme2 + Rust + 三项优化，6.2x 快于 SQLite）
   ↓
-已完成 P1: CLI 参数边界测试 + 代码去重 + Husky v10 兼容性 + Float32 bit-exact
+已完成 P1: CLI 参数边界测试 + 代码去重 + Husky v10 兼容性 + Float32 bit-exact + OS 冷启动 Benchmark V2
   ↓
 P2 待办（推荐顺序）:
   1. scheme1 错误处理迁移（#7，EXPEDIENT，约 11 处 new Error() → PreflopStoreError）
