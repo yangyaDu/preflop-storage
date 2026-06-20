@@ -22,10 +22,10 @@ binary-scheme2/
 
 ```powershell
 # 全量构建
-bun run build:scheme2 --source range-db/new-range.db --out range-db/binary-scheme2-v2
+bun run build --source range-db/new-range.db --out range-db/binary-scheme2-v2
 
 # 构建并输出统计报告
-bun run build:scheme2 \
+bun run build \
   --source range-db/new-range.db \
   --out range-db/binary-scheme2-v2 \
   --stats reports/build-scheme2-v2.json \
@@ -36,7 +36,7 @@ bun run build:scheme2 \
 
 ```powershell
 # 只重建 default:6max:100BB 维度
-bun run build:scheme2 \
+bun run build \
   --source range-db/range.db \
   --out range-db/binary-scheme2 \
   --dimension default:6:100 \
@@ -46,7 +46,7 @@ bun run build:scheme2 \
 ### 2.3 断点续跑（大维度转换中断后继续）
 
 ```powershell
-bun run build:scheme2 \
+bun run build \
   --source range-db/range.db \
   --out range-db/binary-scheme2 \
   --resume \
@@ -60,7 +60,7 @@ bun run build:scheme2 \
 
 ```powershell
 # 1. 构建统计报告 — 确认无错误、压缩比合理
-bun run build:scheme2 \
+bun run build \
   --source range-db/range.db \
   --out range-db/binary-scheme2 \
   --overwrite \
@@ -74,13 +74,13 @@ bun run build:native
 bun run check:release
 
 # 4. Source DB 交叉校验（抽样；严格发布可把 --sample-size 设为 0 做全量）
-bun run verify:scheme2 --mode cross --source range-db/range.db --dir range-db/binary-scheme2 --sample-size 10000 --verify-checksum
+bun run verify --mode cross --source range-db/range.db --dir range-db/binary-scheme2 --sample-size 10000 --verify-checksum
 
 # 5. Benchmark — 校验 Scheme2 查询链路可用并抽样比对结果
-bun run benchmark:scheme2 --dir range-db/binary-scheme2 --iterations 1000 --verify-results
+bun run benchmark --dir range-db/binary-scheme2 --iterations 1000 --verify-results
 
 # 6. Cold-start Benchmark — 默认覆盖 manifest 中全部成功维度，生产产物应为 9 个维度
-bun run benchmark:scheme2:cold --source range-db/range.db --dir range-db/binary-scheme2 --runs 10 --concrete-line-id 1 --hand AA --mode process-cold
+bun run benchmark:cold --source range-db/range.db --dir range-db/binary-scheme2 --runs 10 --concrete-line-id 1 --hand AA --mode process-cold
 ```
 
 V1 native addon 构建流程以 Windows 本机为优先支持环境：Windows x64 使用 `x86_64-pc-windows-msvc`，不要使用默认 GNU target。Linux x64 GNU 和 macOS arm64/x64 已保留脚本 target，实际发布前应在对应平台本机执行 `bun run build:native` 与 `bun run check:native`。
@@ -95,8 +95,8 @@ V1 native addon 构建流程以 Windows 本机为优先支持环境：Windows x6
 | Scheme2 standalone 校验 | manifest/meta/idx/bin/CRC 全部通过 |
 | Scheme2 cross 校验 | source records failed = 0，extra binary records = 0 |
 | Benchmark | p50 查询时间 ≤ 0.012ms，QPS ≥ 80K |
-| 结果抽样核对 | `benchmark:scheme2 --verify-results` 无 mismatch |
-| Cold-start Benchmark | `benchmark:scheme2:cold` 维度数 = 9，errorCount = 0，记录 p50/p95 作为发布基线 |
+| 结果抽样核对 | `benchmark --verify-results` 无 mismatch |
+| Cold-start Benchmark | `benchmark:cold` 维度数 = 9，errorCount = 0，记录 p50/p95 作为发布基线 |
 
 精度阈值参考 `docs/float32-precision-spec.md`。
 
@@ -163,16 +163,16 @@ cp -r range-db/binary-scheme2-backup/* range-db/binary-scheme2/
 
 ```powershell
 # 对当前部署目录执行可用性检查与抽样结果核对
-bun run verify:scheme2 --mode standalone --dir range-db/binary-scheme2 --verify-checksum
-bun run verify:scheme2 --mode cross --source range-db/range.db --dir range-db/binary-scheme2 --sample-size 10000 --verify-checksum
-bun run benchmark:scheme2 --dir range-db/binary-scheme2 --verify-results
+bun run verify --mode standalone --dir range-db/binary-scheme2 --verify-checksum
+bun run verify --mode cross --source range-db/range.db --dir range-db/binary-scheme2 --sample-size 10000 --verify-checksum
+bun run benchmark --dir range-db/binary-scheme2 --verify-results
 ```
 
 ### 5.3 损坏恢复
 
 1. 从独立备份恢复对应文件
 2. 如无备份，使用 `--resume` 重建受影响维度
-3. 重建后重新执行 `bun run check:release`、`bun run verify:scheme2 --mode cross --verify-checksum` 和 `bun run benchmark:scheme2 --verify-results`
+3. 重建后重新执行 `bun run check:release`、`bun run verify --mode cross --verify-checksum` 和 `bun run benchmark --verify-results`
 
 ## 6. 断点续跑实现细节
 
@@ -193,10 +193,10 @@ bun run benchmark:scheme2 --dir range-db/binary-scheme2 --verify-results
 
 ```powershell
 # 重新构建失败或新增的维度
-bun run build:scheme2 --out range-db/binary-scheme2 --resume
+bun run build --out range-db/binary-scheme2 --resume
 
 # 从零重建整个数据集
-bun run build:scheme2 --out range-db/binary-scheme2 --overwrite
+bun run build --out range-db/binary-scheme2 --overwrite
 ```
 
 ## 7. 构建统计报告
@@ -240,7 +240,7 @@ bun run build:scheme2 --out range-db/binary-scheme2 --overwrite
 ### 7.2 命令行输出
 
 ```powershell
-bun run build:scheme2 \
+bun run build \
   --source range-db/range.db \
   --out range-db/binary-scheme2 \
   --overwrite \

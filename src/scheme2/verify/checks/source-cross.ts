@@ -19,7 +19,7 @@ import {
   formatFloat32Bits,
   type Float32PrecisionStats,
 } from "../../../precision/float32";
-import type { BuildManifest } from "../../importer/build-binary-store";
+import type { BuildManifest } from "../../importer/build-types";
 import {
   IDX_HEADER_SIZE,
   IDX_RECORD_SIZE,

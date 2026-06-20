@@ -76,14 +76,14 @@
 
 ### 6. OS 冷启动 Benchmark ✅ **已解决 V2**
 
-**最终状态（2026-06-20）：** 已新增 `bun run benchmark:scheme2:cold` 和自动化测试（3 个用例）。
+**最终状态（2026-06-20）：** 已新增 `bun run benchmark:cold` 和自动化测试（3 个用例）。
 
 V1 基础能力：
 
 - `src/scheme2/cli/benchmark-cold-start.ts`：父进程入口，默认读取 manifest 全部成功维度；生产产物应覆盖 9 个维度。
 - `src/scheme2/cli/benchmark-cold-worker.ts`：单次 fresh process worker。
 - `tests/cold-start-benchmark.test.ts`：2 维度 fixture 测试。
-- `package.json`：`benchmark:scheme2:cold`。
+- `package.json`：`benchmark:cold`。
 
 V2 改进（grilling review 后）：
 
@@ -98,7 +98,7 @@ V2 改进（grilling review 后）：
 推荐 9 维度运行：
 
 ```powershell
-bun run benchmark:scheme2:cold --source range-db/range.db --dir range-db/binary-scheme2 --runs 10 --query-policy fixed --concrete-line-id 1 --hand AA --mode process-cold
+bun run benchmark:cold --source range-db/range.db --dir range-db/binary-scheme2 --runs 10 --query-policy fixed --concrete-line-id 1 --hand AA --mode process-cold
 ```
 
 当前本机基线（2026-06-20）：9 个维度、90 runs、0 errors；aggregate store open+first-query p50 / p95 为 `340.36 ms / 2822.17 ms`，aggregate process elapsed p50 / p95 为 `518.28 ms / 3023.35 ms`。阶段拆分显示主要瓶颈是 `Dimension prewarm`，p50 / p95 为 `338.85 ms / 2820.40 ms`；首查 decode p50 / p95 仅 `0.46 ms / 0.70 ms`。Phase accounting 一致性：90 runs 最大 `unaccountedMs` 0.185ms。报告见 `reports/benchmark-cold-start.md`。

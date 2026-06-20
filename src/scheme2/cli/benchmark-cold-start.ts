@@ -7,7 +7,7 @@ import { formatBytes, markdownTable } from "../../analysis/format";
 import { getBooleanArg, getNumberArg, getRepeatedStringArgs, getStringArg, parseCliArgs } from "../../cli/args";
 import { dimensionKey, quoteIdentifier } from "../../db/naming";
 import { parseRequestedDimension, type MemorySnapshot } from "../../benchmark/common";
-import type { BuildManifest, BuildManifestDimension } from "../importer/build-binary-store";
+import type { BuildManifest, BuildManifestDimension } from "../importer/build-types";
 
 type ColdStartMode = "process-cold" | "os-best-effort" | "linux-drop-cache";
 type QueryPolicy = "first" | "fixed";

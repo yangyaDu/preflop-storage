@@ -15,11 +15,11 @@
 
 当前推荐使用：
 
-- 构建：`bun run build:scheme2`
-- 查询：`bun run query:scheme2`
-- 校验：`bun run verify:scheme2`
-- 压测：`bun run benchmark:scheme2`
-- 冷启动压测：`bun run benchmark:scheme2:cold`
+- 构建：`bun run build`
+- 查询：`bun run query`
+- 校验：`bun run verify`
+- 压测：`bun run benchmark`
+- 冷启动压测：`bun run benchmark:cold`
 
 ## 当前进度总览
 
@@ -34,14 +34,14 @@
 | 分析报告 | 已完成 | SQLite 分析、存储分析、benchmark 报告已落盘到 `reports/` |
 | 查询 SDK 文档 | 已完成 | 见 `docs/query-sdk.md` |
 | 部署/回滚文档 | 已完成 | 见 `docs/deploy-and-rollback.md` |
-| 自动化全量校验（Scheme2 专用） | 已完成 | `verify:scheme2` 支持 standalone 自检 + cross 交叉校验 |
-| OS 冷启动 Benchmark | 已完成 V2 | `benchmark:scheme2:cold` 默认覆盖 manifest 中全部成功维度，生产产物应覆盖 9 个维度。V2 新增：失败隔离、phase accounting、`--query-policy`、`--fail-fast`、父进程 RSS、非零 filler |
+| 自动化全量校验（Scheme2 专用） | 已完成 | `verify` 支持 standalone 自检 + cross 交叉校验 |
+| OS 冷启动 Benchmark | 已完成 V2 | `benchmark:cold` 默认覆盖 manifest 中全部成功维度，生产产物应覆盖 9 个维度。V2 新增：失败隔离、phase accounting、`--query-policy`、`--fail-fast`、父进程 RSS、非零 filler |
 
 ## 最近完成的变更
 
 ### 1. Scheme2 全量校验命令（新增）
 
-新增 `bun run verify:scheme2` 命令，提供两条校验链路：
+新增 `bun run verify` 命令，提供两条校验链路：
 
 - **standalone 模式（默认）**：不依赖 source DB，对 `manifest.json`、`meta.db`、`.idx`、`.bin` 做文件存在性、格式魔数、CRC32C 完整性、引用交叉校验。适合生产部署前自检。
 - **cross 模式**：叠加 source DB（`range.db`）交叉校验，对每条记录的 frequency/handEV 做逐行对比（采样 + 全量），复用了 Scheme1 的容差策略。
@@ -133,7 +133,7 @@ Float32 bits(decoded) === Float32 bits(source)
 
 ### 6. OS 冷启动 Benchmark V1
 
-新增 `bun run benchmark:scheme2:cold`，用于把 Scheme2 冷启动开销从常规热路径 benchmark 中单独拆出来。
+新增 `bun run benchmark:cold`，用于把 Scheme2 冷启动开销从常规热路径 benchmark 中单独拆出来。
 
 默认行为：
 
@@ -147,7 +147,7 @@ Float32 bits(decoded) === Float32 bits(source)
 推荐 9 维度命令：
 
 ```powershell
-bun run benchmark:scheme2:cold `
+bun run benchmark:cold `
   --source range-db/range.db `
   --dir range-db/binary-scheme2 `
   --runs 10 `
@@ -189,7 +189,7 @@ V2 修复了 grilling review 发现的 6 个设计缺陷：
 2. **失败 run 隔离**：失败 run 的全零 timing 不再污染 latency 聚合（仅 `r.ok` 参与）。每个维度新增 `successCount`、`failures[]` 字段。新增 `--max-errors-per-dimension` 和 `--fail-fast` 韧性控制。
 3. **`os-best-effort` filler 改为非零确定性模式**：避免 OS zero-page dedup。语义降级为「cache perturbation」而非「cache eviction」。报告输出 filler/dataset 比例。
 4. **Phase accounting 校验**：每个 run 计算 `phaseSumMs - workerTotalMs`，输出 `unaccountedMs` 和 `unaccountedRatio`，并在报告中记录最差情况。
-5. **`--query-policy` 查询策略**：支持 `first`（默认，取 source DB 首条查询）和 `fixed`（需 `--concrete-line-id + --hand`）。未来 roadmap：`round-robin`、`random`、`stratified`。
+5. **`--query-policy` 查询策略**：支持 `first`（默认，取 source DB 首条查询）和 `fixed`（需 `--concrete-line-id + --hand`）。
 6. **父进程 RSS 监控**：每个维度完成后采样 `process.memoryUsage().rss`，记录到 `aggregate.parentRssSamples`。
 
 自动化测试：
@@ -204,6 +204,19 @@ V2 修复了 grilling review 发现的 6 个设计缺陷：
 - `os-best-effort` 通过临时大文件扰动文件缓存，便携但不保证严格冷缓存。
 - `linux-drop-cache` 需要 Linux 和足够权限写 `/proc/sys/vm/drop_caches`。
 
+### 6c. 下一步：`rotate-hand` query policy
+
+当前冷启动瓶颈在 `dimensionPrewarmMs`（~340ms p50），`firstQueryMs` 仅 ~0.46ms。按 pack 大小做 `stratified` 分层或按 `concrete_line_id` 做 `round-robin` 都无法产生新的诊断信号——首查 decode 差异被 mmap + schema 加载的固定成本淹没。
+
+计划新增 `--query-policy rotate-hand`：
+
+- **固定 concrete_line_id，per-run 轮转不同的 `hand`**（按 `HANDS_169` 字典）。
+- 不改变 prewarm（concrete_line_id 不变），只改变 action mask popcount 和 NAPI 返回的 action 数量。
+- 用 169 种起手牌的天然差异性（AA 通常 3 个 action，72o 可能 1-2 个）覆盖最小变化量。
+- 实现成本极低：不需要扫描 .idx、不需要统计 pack 大小、不需要 source DB 额外查询。
+
+真正的 workload 口径（stratified by pack size / round-robin concrete_line_id）待到 prewarm 被优化、`firstQueryMs` 占比上升后再做。
+
 ### 7. 当前质量状态
 
 最近一次质量检查结果：
@@ -212,7 +225,7 @@ V2 修复了 grilling review 发现的 6 个设计缺陷：
 - `bun run lint` 通过
 - `bun test` 通过
 - `cargo test --manifest-path native-addon/Cargo.toml` 通过
-- 总计 `121` 个 Bun 测试通过，`19` 个 Rust 测试通过
+- 总计 `122` 个 Bun 测试通过，`19` 个 Rust 测试通过
 
 ## 当前产物与能力
 
@@ -326,16 +339,16 @@ bun run build:native
 bun run check
 
 # 4. 构建 Scheme2 数据
-bun run build:scheme2 --source range-db/range.db --out range-db/binary-scheme2 --overwrite
+bun run build --source range-db/range.db --out range-db/binary-scheme2 --overwrite
 
 # 5. 发布前额外检查：Bun + Rust + Scheme2 standalone 自检
 bun run check:release
 
 # 6. 9 维度 fresh process 冷启动 benchmark
-bun run benchmark:scheme2:cold --source range-db/range.db --dir range-db/binary-scheme2 --runs 10 --concrete-line-id 1 --hand AA --mode process-cold
+bun run benchmark:cold --source range-db/range.db --dir range-db/binary-scheme2 --runs 10 --concrete-line-id 1 --hand AA --mode process-cold
 
 # 7. 查询验证
-bun run query:scheme2 --dir range-db/binary-scheme2 --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand AA
+bun run query --dir range-db/binary-scheme2 --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand AA
 ```
 
 ## 相关文档

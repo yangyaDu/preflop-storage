@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { crc32c } from "../../../binary/crc32c";
 import { getConcreteLinesTableName, getDrillScenarioTableName } from "../../db/naming";
-import type { BuildManifest } from "../../importer/build-binary-store";
+import type { BuildManifest } from "../../importer/build-types";
 import type { VerifyCheckResult, VerifyFailure } from "../report";
 
 interface SchemaRow {

@@ -5,7 +5,7 @@ import {
   decodeFileHeader,
   assertSupportedHeader,
 } from "../../../binary/file-header";
-import type { BuildManifest } from "../../importer/build-binary-store";
+import type { BuildManifest } from "../../importer/build-types";
 import { dimensionKey } from "../../db/naming";
 import type { VerifyCheckResult, VerifyFailure } from "../report";
 

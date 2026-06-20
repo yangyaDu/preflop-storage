@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import type { BuildManifest } from "../../importer/build-binary-store";
+import type { BuildManifest } from "../../importer/build-types";
 import { dimensionKey } from "../../db/naming";
 import type { VerifyCheckResult, VerifyFailure } from "../report";
 

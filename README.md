@@ -149,13 +149,13 @@ bun run check:release
 先构建 Scheme2：
 
 ```powershell
-bun run build:scheme2 --source range-db/range.db --out range-db/binary-scheme2 --overwrite
+bun run build --source range-db/range.db --out range-db/binary-scheme2 --overwrite
 ```
 
 再查询一手牌：
 
 ```powershell
-bun run query:scheme2 --dir range-db/binary-scheme2 --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand AA
+bun run query --dir range-db/binary-scheme2 --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand AA
 ```
 
 ## 主要脚本说明和使用方法
@@ -187,7 +187,7 @@ bun run check
 当前主构建脚本：
 
 ```powershell
-bun run build:scheme2
+bun run build
 ```
 
 它对应的实际入口是：
@@ -212,13 +212,13 @@ src/scheme2/cli/build-binary.ts
 #### 全量重建
 
 ```powershell
-bun run build:scheme2 --source range-db/range.db --out range-db/binary-scheme2 --overwrite
+bun run build --source range-db/range.db --out range-db/binary-scheme2 --overwrite
 ```
 
 #### 中断后续跑
 
 ```powershell
-bun run build:scheme2 --source range-db/range.db --out range-db/binary-scheme2 --resume
+bun run build --source range-db/range.db --out range-db/binary-scheme2 --resume
 ```
 
 `--resume` 只适合同一个 source DB 的中断恢复。如果 SQLite 源库内容发生变化，命令会拒绝续跑；请改用 `--overwrite` 重新生成完整一致的数据版本。
@@ -226,7 +226,7 @@ bun run build:scheme2 --source range-db/range.db --out range-db/binary-scheme2 -
 #### 只构建一个维度
 
 ```powershell
-bun run build:scheme2 --dimension default:6:100 --overwrite
+bun run build --dimension default:6:100 --overwrite
 ```
 
 `--dimension` 支持两种写法：
@@ -239,7 +239,7 @@ default_6max_100BB
 #### 输出构建报告
 
 ```powershell
-bun run build:scheme2 `
+bun run build `
   --source range-db/range.db `
   --out range-db/binary-scheme2 `
   --overwrite `
@@ -252,7 +252,7 @@ bun run build:scheme2 `
 当前主查询脚本：
 
 ```powershell
-bun run query:scheme2
+bun run query
 ```
 
 对应入口：
@@ -277,7 +277,7 @@ src/scheme2/cli/query-hand.ts
 #### 示例
 
 ```powershell
-bun run query:scheme2 `
+bun run query `
   --dir range-db/binary-scheme2 `
   --player-count 6 `
   --depth-bb 100 `
@@ -347,13 +347,13 @@ bun run analyze
 当前主线校验脚本是：
 
 ```powershell
-bun run verify:scheme2
+bun run verify
 ```
 
 默认 `standalone` 模式不依赖 source DB，会检查 `manifest.json`、`meta.db`、`.idx`、`.bin` 的结构和交叉引用。
 
 ```powershell
-bun run verify:scheme2 `
+bun run verify `
   --mode standalone `
   --dir range-db/binary-scheme2 `
   --verify-checksum `
@@ -364,7 +364,7 @@ bun run verify:scheme2 `
 需要和旧 SQLite 源库做数据交叉校验时使用 `cross` 模式：
 
 ```powershell
-bun run verify:scheme2 `
+bun run verify `
   --mode cross `
   --source range-db/range.db `
   --dir range-db/binary-scheme2 `
@@ -432,13 +432,13 @@ bun run benchmark:binary
 #### Scheme2 主线路径
 
 ```powershell
-bun run benchmark:scheme2
+bun run benchmark
 ```
 
 推荐的 Scheme2 示例：
 
 ```powershell
-bun run benchmark:scheme2 `
+bun run benchmark `
   --dir range-db/binary-scheme2 `
   --iterations 1000 `
   --batch-iterations 200 `
@@ -462,7 +462,7 @@ bun run benchmark:scheme2 `
 默认读取 `manifest.json` 中全部成功维度；当前生产产物应覆盖 9 个维度。
 
 ```powershell
-bun run benchmark:scheme2:cold `
+bun run benchmark:cold `
   --source range-db/range.db `
   --dir range-db/binary-scheme2 `
   --runs 10 `
@@ -489,8 +489,6 @@ bun run benchmark:compare `
   --out reports/benchmark-report.json `
   --md reports/benchmark-report.md
 ```
-
-注意：`package.json` 里的 `bun run benchmark` 聚合脚本目前仍走的是 SQLite + Scheme1 + compare 这条历史链路，不包含 `benchmark:scheme2`。
 
 ## 输出目录和产物说明
 

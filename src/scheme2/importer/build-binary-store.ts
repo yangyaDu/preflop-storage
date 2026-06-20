@@ -20,20 +20,18 @@ import { filterDimensions } from "../../utils/dimension";
 import { getIdxFileName } from "../db/naming";
 import { initLightMetaDb } from "../db/schema";
 import { RangeIdxWriter } from "../idx/idx-writer";
+import { resolveBuildPlan } from "./build-plan";
+import type { BuildBinaryStoreSchema2Options, BuildManifest, BuildReport, DimensionBuildStats } from "./build-types";
+import { cleanupPreviousOutput } from "./cleanup-output";
 
-export interface BuildBinaryStoreSchema2Options {
-  sourceDbPath: string;
-  outDir: string;
-  overwrite?: boolean;
-  /** Skip dimensions already completed (based on manifest.json). */
-  resume?: boolean;
-  dimensions?: Array<Pick<RangeDimension, "strategy" | "playerCount" | "depthBb">>;
-  maxConcreteLinesPerDimension?: number;
-  progressEveryPacks?: number;
-  /** Output build stats to JSON + Markdown. */
-  statsOutPath?: string;
-  statsMdPath?: string;
-}
+export type {
+  BuildBinaryStoreSchema2Options,
+  BuildManifest,
+  BuildManifestDimension,
+  BuildManifestDimensionStatus,
+  BuildReport,
+  DimensionBuildStats,
+} from "./build-types";
 
 interface BuildStatements {
   insertDrillLineByStrategy: Map<string, ReturnType<Database["prepare"]>>;
@@ -43,81 +41,13 @@ interface BuildStatements {
   lastInsertId: ReturnType<Database["prepare"]>;
 }
 
-export interface BuildManifest {
-  format: "PFSP";
-  version: 1;
-  sourceDbChecksum: string;
-  builtAt: string;
-  dimensions: BuildManifestDimension[];
-  files: string[];
-}
-
-export type BuildManifestDimensionStatus = "success" | "failed";
-
-export interface BuildManifestDimension {
-  strategy: string;
-  playerCount: number;
-  depthBb: number;
-  concreteLineCount: number;
-  packCount: number;
-  status?: BuildManifestDimensionStatus;
-  error?: string | null;
-  binFile?: string;
-  idxFile?: string;
-  binFileSizeBytes?: number;
-  idxFileSizeBytes?: number;
-}
-
-export interface DimensionBuildStats {
-  strategy: string;
-  playerCount: number;
-  depthBb: number;
-  concreteLineCount: number;
-  packCount: number;
-  binFileSizeBytes: number;
-  idxFileSizeBytes: number;
-  srcRowCount: number;
-  durationMs: number;
-  error: string | null;
-}
-
-export interface BuildReport {
-  generatedAt: string;
-  sourceDbPath: string;
-  sourceDbSizeBytes: number;
-  outDir: string;
-  outputTotalSizeBytes: number;
-  outputMetaDbSizeBytes: number;
-  compressionRatio: number;
-  dimensions: DimensionBuildStats[];
-  totals: {
-    dimensionCount: number;
-    concreteLineCount: number;
-    packCount: number;
-    srcRowCount: number;
-    totalDurationMs: number;
-    errorCount: number;
-  };
-}
-
 export async function buildBinaryStoreScheme2(options: BuildBinaryStoreSchema2Options): Promise<BuildReport> {
   const buildStart = performance.now();
   await mkdir(options.outDir, { recursive: true });
 
   const metaPath = join(options.outDir, "meta.db");
   const manifestPath = join(options.outDir, "manifest.json");
-  let previousManifest = await readBuildManifest(manifestPath);
-
-  // Reject if meta.db already exists and overwrite is not set
-  if (existsSync(metaPath) && !options.overwrite) {
-    if (options.resume && previousManifest) {
-      // Resume mode — ok to continue with existing meta.db
-    } else if (options.resume) {
-      throw new PreflopStoreError("BUILD_ERROR", "meta.db exists but manifest.json is missing or unreadable. Pass --overwrite to rebuild from scratch.", { metaPath });
-    } else {
-      throw new PreflopStoreError("BUILD_ERROR", `Output meta DB already exists: ${metaPath}. Pass --overwrite to rebuild it or --resume to continue.`, { metaPath });
-    }
-  }
+  const previousManifest = await readBuildManifest(manifestPath);
 
   // Calculate source DB size
   let sourceDbSizeBytes = 0;
@@ -128,28 +58,23 @@ export async function buildBinaryStoreScheme2(options: BuildBinaryStoreSchema2Op
 
   // Compute source DB checksum
   const sourceDbChecksum = await computeFileSha256(options.sourceDbPath);
-  if (options.resume && previousManifest && !options.overwrite) {
-    assertResumeSourceChecksum(previousManifest, sourceDbChecksum);
-  }
 
   const sourceDb = new Database(options.sourceDbPath, { readonly: true });
   const allDimensions = filterDimensions(discoverRangeDimensions(sourceDb), options.dimensions);
   const strategies = uniqueStrategies(allDimensions);
+  const buildPlan = await resolveBuildPlan({
+    options,
+    metaPath,
+    previousManifest,
+    sourceDbChecksum,
+    allDimensions,
+  });
 
-  // If overwrite is set, clean up previous output and ignore resume
-  if (options.overwrite) {
+  if (buildPlan.shouldCleanupOutput) {
     await cleanupPreviousOutput({ outDir: options.outDir, metaPath, manifestPath, manifest: previousManifest, dimensions: allDimensions });
-    previousManifest = null;
   }
-
-  const isFreshBuild = !existsSync(metaPath);
-  const previousCompletedStats = options.resume && !isFreshBuild && previousManifest
-    ? await collectCompletedManifestStats(previousManifest, options.outDir)
-    : [];
-  const completedDimKeys = new Set(previousCompletedStats.map((dimension) => manifestDimensionKey(dimension)));
-  const dimensionsToBuild = options.resume && !isFreshBuild
-    ? allDimensions.filter((dimension) => !completedDimKeys.has(manifestDimensionKey(dimension)))
-    : allDimensions;
+  const { previousCompletedStats, dimensionsToBuild } = buildPlan;
+  const isFreshBuild = buildPlan.mode !== "resume";
 
   const metaDb = new Database(metaPath);
   let statements: BuildStatements | null = null;
@@ -182,22 +107,8 @@ export async function buildBinaryStoreScheme2(options: BuildBinaryStoreSchema2Op
     const dimensionStats: DimensionBuildStats[] = [...previousCompletedStats];
 
     for (const dimension of dimensionsToBuild) {
-      const dimStart = performance.now();
-      const dimStat: DimensionBuildStats = {
-        strategy: dimension.strategy,
-        playerCount: dimension.playerCount,
-        depthBb: dimension.depthBb,
-        concreteLineCount: 0,
-        packCount: 0,
-        binFileSizeBytes: 0,
-        idxFileSizeBytes: 0,
-        srcRowCount: 0,
-        durationMs: 0,
-        error: null,
-      };
-
-      try {
-        const result = await buildDimension({
+      dimensionStats.push(
+        await buildDimensionWithStats({
           sourceDb,
           metaDb,
           statements,
@@ -207,125 +118,21 @@ export async function buildBinaryStoreScheme2(options: BuildBinaryStoreSchema2Op
           overwrite: options.overwrite,
           maxConcreteLines: options.maxConcreteLinesPerDimension,
           progressEveryPacks: options.progressEveryPacks ?? 10000,
-        });
-
-        // Get file sizes
-        try {
-          const binStat = await stat(join(options.outDir, dimension.binFile));
-          dimStat.binFileSizeBytes = binStat.size;
-        } catch { /* ignore */ }
-        try {
-          const idxStat = await stat(join(options.outDir, getIdxFileName(dimension.strategy, dimension.playerCount, dimension.depthBb)));
-          dimStat.idxFileSizeBytes = idxStat.size;
-        } catch { /* ignore */ }
-
-        dimStat.packCount = result.packCount;
-        dimStat.concreteLineCount = result.concreteLineCount;
-        dimStat.srcRowCount = result.srcRowCount;
-      } catch (error) {
-        dimStat.error = error instanceof Error ? error.message : String(error);
-      }
-
-      dimStat.durationMs = performance.now() - dimStart;
-      dimensionStats.push(dimStat);
+        }),
+      );
     }
 
-    // Write manifest
-    const manifest: BuildManifest = {
-      format: "PFSP",
-      version: 1,
+    return await writeManifestAndReport({
+      options,
+      metaDb,
+      metaPath,
+      manifestPath,
       sourceDbChecksum,
-      builtAt: new Date().toISOString(),
-      dimensions: dimensionStats.map((s) => ({
-        strategy: s.strategy,
-        playerCount: s.playerCount,
-        depthBb: s.depthBb,
-        concreteLineCount: s.concreteLineCount,
-        packCount: s.packCount,
-        status: s.error ? "failed" : "success",
-        error: s.error,
-        binFile: getBinFileName(s.strategy, s.playerCount, s.depthBb),
-        idxFile: getIdxFileName(s.strategy, s.playerCount, s.depthBb),
-        binFileSizeBytes: s.binFileSizeBytes,
-        idxFileSizeBytes: s.idxFileSizeBytes,
-      })),
-      files: ["meta.db"],
-    };
-
-    // Collect bin/idx files
-    for (const dim of allDimensions) {
-      manifest.files.push(getBinFileName(dim.strategy, dim.playerCount, dim.depthBb));
-      manifest.files.push(getIdxFileName(dim.strategy, dim.playerCount, dim.depthBb));
-    }
-
-    await Bun.write(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
-
-    // Update build_info in meta.db
-    metaDb
-      .prepare("INSERT OR REPLACE INTO build_info(key, value) VALUES (?, ?)")
-      .run("built_at", manifest.builtAt);
-    metaDb
-      .prepare("INSERT OR REPLACE INTO build_info(key, value) VALUES (?, ?)")
-      .run("source_checksum", sourceDbChecksum);
-    metaDb.exec("PRAGMA wal_checkpoint(TRUNCATE); PRAGMA journal_mode = DELETE;");
-
-    // Calculate total sizes
-    let outputTotalSizeBytes = 0;
-    let outputMetaDbSizeBytes = 0;
-    try {
-      const ms = await stat(metaPath);
-      outputMetaDbSizeBytes = ms.size;
-      outputTotalSizeBytes += ms.size;
-    } catch { /* ignore */ }
-    for (const s of dimensionStats) {
-      outputTotalSizeBytes += s.binFileSizeBytes + s.idxFileSizeBytes;
-    }
-
-    const totalDuration = performance.now() - buildStart;
-
-    const report: BuildReport = {
-      generatedAt: manifest.builtAt,
-      sourceDbPath: options.sourceDbPath,
       sourceDbSizeBytes,
-      outDir: options.outDir,
-      outputTotalSizeBytes,
-      outputMetaDbSizeBytes,
-      compressionRatio: sourceDbSizeBytes > 0 ? outputTotalSizeBytes / sourceDbSizeBytes : 0,
-      dimensions: dimensionStats,
-      totals: {
-        dimensionCount: allDimensions.length,
-        concreteLineCount: sum(dimensionStats.map((s) => s.concreteLineCount)),
-        packCount: sum(dimensionStats.map((s) => s.packCount)),
-        srcRowCount: sum(dimensionStats.map((s) => s.srcRowCount)),
-        totalDurationMs: totalDuration,
-        errorCount: dimensionStats.filter((s) => s.error).length,
-      },
-    };
-
-    // Output stats if requested
-    if (options.statsOutPath) {
-      await mkdir(dirnameSafe(options.statsOutPath), { recursive: true });
-      await Bun.write(options.statsOutPath, JSON.stringify(report, null, 2) + "\n");
-    }
-
-    if (options.statsMdPath) {
-      await mkdir(dirnameSafe(options.statsMdPath), { recursive: true });
-      await Bun.write(options.statsMdPath, renderBuildReportMarkdown(report));
-    }
-
-    // Print summary
-    console.log(
-      `\nBuild complete: ${report.totals.dimensionCount} dimensions, ${formatNum(report.totals.packCount)} packs, ${formatNum(report.totals.concreteLineCount)} lines`,
-    );
-    console.log(
-      `Source: ${formatBytes(report.sourceDbSizeBytes)}, Output: ${formatBytes(report.outputTotalSizeBytes)} (${(report.compressionRatio * 100).toFixed(1)}%)`,
-    );
-    console.log(`Duration: ${(report.totals.totalDurationMs / 1000).toFixed(1)}s`);
-    if (report.totals.errorCount > 0) {
-      console.log(`Errors: ${report.totals.errorCount}`);
-    }
-
-    return report;
+      allDimensions,
+      dimensionStats,
+      buildStart,
+    });
   } finally {
     finalizeBuildStatements(statements);
     metaDb.close();
@@ -347,117 +154,173 @@ async function readBuildManifest(manifestPath: string): Promise<BuildManifest | 
   }
 }
 
-function assertResumeSourceChecksum(previousManifest: BuildManifest, sourceDbChecksum: string): void {
-  const previousChecksum = previousManifest.sourceDbChecksum;
-  if (!previousChecksum || previousChecksum === "unknown" || sourceDbChecksum === "unknown") {
-    return;
-  }
-
-  if (previousChecksum !== sourceDbChecksum) {
-    throw new PreflopStoreError(
-      "BUILD_ERROR",
-      "Source DB checksum differs from manifest.json. Refusing --resume because completed dimensions may be stale. Pass --overwrite to rebuild from scratch.",
-      {
-        manifestChecksum: previousChecksum,
-        sourceDbChecksum,
-      },
-    );
-  }
-}
-
-async function cleanupPreviousOutput(params: {
-  outDir: string;
-  metaPath: string;
-  manifestPath: string;
-  manifest: BuildManifest | null;
-  dimensions: RangeDimension[];
-}): Promise<void> {
-  const paths = new Set<string>([
-    params.metaPath,
-    `${params.metaPath}-wal`,
-    `${params.metaPath}-shm`,
-    params.manifestPath,
-  ]);
-
-  for (const file of params.manifest?.files ?? []) {
-    if (file !== "meta.db") paths.add(join(params.outDir, file));
-  }
-
-  for (const dimension of params.dimensions) {
-    const binFile = join(params.outDir, dimension.binFile);
-    const idxFile = join(params.outDir, getIdxFileName(dimension.strategy, dimension.playerCount, dimension.depthBb));
-    paths.add(binFile);
-    paths.add(idxFile);
-    paths.add(`${binFile}.tmp`);
-    paths.add(`${idxFile}.tmp`);
-  }
-
-  for (const path of paths) {
-    await removeFileWithRetry(path);
-  }
-}
-
-async function removeFileWithRetry(path: string): Promise<void> {
-  let lastError: unknown;
-
-  for (let attempt = 0; attempt < 100; attempt++) {
-    try {
-      await rm(path, { force: true });
-      return;
-    } catch (error) {
-      lastError = error;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  }
-
-  throw lastError;
-}
-
-async function collectCompletedManifestStats(manifest: BuildManifest, outDir: string): Promise<DimensionBuildStats[]> {
-  const completed: DimensionBuildStats[] = [];
-
-  for (const dimension of manifest.dimensions) {
-    if (dimension.status !== "success") continue;
-
-    const binFile = dimension.binFile ?? getBinFileName(dimension.strategy, dimension.playerCount, dimension.depthBb);
-    const idxFile = dimension.idxFile ?? getIdxFileName(dimension.strategy, dimension.playerCount, dimension.depthBb);
-    const binPath = join(outDir, binFile);
-    const idxPath = join(outDir, idxFile);
-
-    try {
-      const binStat = await stat(binPath);
-      const idxStat = await stat(idxPath);
-      if (dimension.binFileSizeBytes !== undefined && dimension.binFileSizeBytes !== binStat.size) continue;
-      if (dimension.idxFileSizeBytes !== undefined && dimension.idxFileSizeBytes !== idxStat.size) continue;
-
-      completed.push({
-        strategy: dimension.strategy,
-        playerCount: dimension.playerCount,
-        depthBb: dimension.depthBb,
-        concreteLineCount: dimension.concreteLineCount,
-        packCount: dimension.packCount,
-        binFileSizeBytes: binStat.size,
-        idxFileSizeBytes: idxStat.size,
-        srcRowCount: 0,
-        durationMs: 0,
-        error: null,
-      });
-    } catch {
-      // Missing or unreadable output is treated as incomplete and rebuilt.
-    }
-  }
-
-  return completed;
-}
-
-function manifestDimensionKey(dimension: Pick<RangeDimension, "strategy" | "playerCount" | "depthBb">): string {
-  return `${dimension.strategy}:${dimension.playerCount}:${dimension.depthBb}`;
-}
-
 interface DimensionBuildResult {
   packCount: number;
   concreteLineCount: number;
   srcRowCount: number;
+}
+
+async function buildDimensionWithStats(params: {
+  sourceDb: Database;
+  metaDb: Database;
+  statements: BuildStatements;
+  schemaIdByKey: Map<string, number>;
+  dimension: RangeDimension;
+  outDir: string;
+  overwrite?: boolean;
+  maxConcreteLines?: number;
+  progressEveryPacks: number;
+}): Promise<DimensionBuildStats> {
+  const dimStart = performance.now();
+  const { dimension } = params;
+  const dimStat: DimensionBuildStats = {
+    strategy: dimension.strategy,
+    playerCount: dimension.playerCount,
+    depthBb: dimension.depthBb,
+    concreteLineCount: 0,
+    packCount: 0,
+    binFileSizeBytes: 0,
+    idxFileSizeBytes: 0,
+    srcRowCount: 0,
+    durationMs: 0,
+    error: null,
+  };
+
+  try {
+    const result = await buildDimension(params);
+
+    try {
+      const binStat = await stat(join(params.outDir, dimension.binFile));
+      dimStat.binFileSizeBytes = binStat.size;
+    } catch { /* ignore */ }
+    try {
+      const idxStat = await stat(join(params.outDir, getIdxFileName(dimension.strategy, dimension.playerCount, dimension.depthBb)));
+      dimStat.idxFileSizeBytes = idxStat.size;
+    } catch { /* ignore */ }
+
+    dimStat.packCount = result.packCount;
+    dimStat.concreteLineCount = result.concreteLineCount;
+    dimStat.srcRowCount = result.srcRowCount;
+  } catch (error) {
+    dimStat.error = error instanceof Error ? error.message : String(error);
+  }
+
+  dimStat.durationMs = performance.now() - dimStart;
+  return dimStat;
+}
+
+async function writeManifestAndReport(params: {
+  options: BuildBinaryStoreSchema2Options;
+  metaDb: Database;
+  metaPath: string;
+  manifestPath: string;
+  sourceDbChecksum: string;
+  sourceDbSizeBytes: number;
+  allDimensions: RangeDimension[];
+  dimensionStats: DimensionBuildStats[];
+  buildStart: number;
+}): Promise<BuildReport> {
+  const {
+    options,
+    metaDb,
+    metaPath,
+    manifestPath,
+    sourceDbChecksum,
+    sourceDbSizeBytes,
+    allDimensions,
+    dimensionStats,
+    buildStart,
+  } = params;
+
+  const manifest: BuildManifest = {
+    format: "PFSP",
+    version: 1,
+    sourceDbChecksum,
+    builtAt: new Date().toISOString(),
+    dimensions: dimensionStats.map((s) => ({
+      strategy: s.strategy,
+      playerCount: s.playerCount,
+      depthBb: s.depthBb,
+      concreteLineCount: s.concreteLineCount,
+      packCount: s.packCount,
+      status: s.error ? "failed" : "success",
+      error: s.error,
+      binFile: getBinFileName(s.strategy, s.playerCount, s.depthBb),
+      idxFile: getIdxFileName(s.strategy, s.playerCount, s.depthBb),
+      binFileSizeBytes: s.binFileSizeBytes,
+      idxFileSizeBytes: s.idxFileSizeBytes,
+    })),
+    files: ["meta.db"],
+  };
+
+  for (const dim of allDimensions) {
+    manifest.files.push(getBinFileName(dim.strategy, dim.playerCount, dim.depthBb));
+    manifest.files.push(getIdxFileName(dim.strategy, dim.playerCount, dim.depthBb));
+  }
+
+  await Bun.write(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+
+  metaDb
+    .prepare("INSERT OR REPLACE INTO build_info(key, value) VALUES (?, ?)")
+    .run("built_at", manifest.builtAt);
+  metaDb
+    .prepare("INSERT OR REPLACE INTO build_info(key, value) VALUES (?, ?)")
+    .run("source_checksum", sourceDbChecksum);
+  metaDb.exec("PRAGMA wal_checkpoint(TRUNCATE); PRAGMA journal_mode = DELETE;");
+
+  let outputTotalSizeBytes = 0;
+  let outputMetaDbSizeBytes = 0;
+  try {
+    const ms = await stat(metaPath);
+    outputMetaDbSizeBytes = ms.size;
+    outputTotalSizeBytes += ms.size;
+  } catch { /* ignore */ }
+  for (const s of dimensionStats) {
+    outputTotalSizeBytes += s.binFileSizeBytes + s.idxFileSizeBytes;
+  }
+
+  const totalDuration = performance.now() - buildStart;
+  const report: BuildReport = {
+    generatedAt: manifest.builtAt,
+    sourceDbPath: options.sourceDbPath,
+    sourceDbSizeBytes,
+    outDir: options.outDir,
+    outputTotalSizeBytes,
+    outputMetaDbSizeBytes,
+    compressionRatio: sourceDbSizeBytes > 0 ? outputTotalSizeBytes / sourceDbSizeBytes : 0,
+    dimensions: dimensionStats,
+    totals: {
+      dimensionCount: allDimensions.length,
+      concreteLineCount: sum(dimensionStats.map((s) => s.concreteLineCount)),
+      packCount: sum(dimensionStats.map((s) => s.packCount)),
+      srcRowCount: sum(dimensionStats.map((s) => s.srcRowCount)),
+      totalDurationMs: totalDuration,
+      errorCount: dimensionStats.filter((s) => s.error).length,
+    },
+  };
+
+  if (options.statsOutPath) {
+    await mkdir(dirnameSafe(options.statsOutPath), { recursive: true });
+    await Bun.write(options.statsOutPath, JSON.stringify(report, null, 2) + "\n");
+  }
+
+  if (options.statsMdPath) {
+    await mkdir(dirnameSafe(options.statsMdPath), { recursive: true });
+    await Bun.write(options.statsMdPath, renderBuildReportMarkdown(report));
+  }
+
+  console.log(
+    `\nBuild complete: ${report.totals.dimensionCount} dimensions, ${formatNum(report.totals.packCount)} packs, ${formatNum(report.totals.concreteLineCount)} lines`,
+  );
+  console.log(
+    `Source: ${formatBytes(report.sourceDbSizeBytes)}, Output: ${formatBytes(report.outputTotalSizeBytes)} (${(report.compressionRatio * 100).toFixed(1)}%)`,
+  );
+  console.log(`Duration: ${(report.totals.totalDurationMs / 1000).toFixed(1)}s`);
+  if (report.totals.errorCount > 0) {
+    console.log(`Errors: ${report.totals.errorCount}`);
+  }
+
+  return report;
 }
 
 function prepareBuildStatements(metaDb: Database, dimensions: RangeDimension[]): BuildStatements {

@@ -1,6 +1,6 @@
 import { runStandaloneVerify } from "./standalone";
 import { runSourceCross } from "./checks/source-cross";
-import type { BuildManifest } from "../importer/build-binary-store";
+import type { BuildManifest } from "../importer/build-types";
 import { createReport, writeJsonReport, writeMdReport, type Scheme2VerifyReport, type VerifyFailure } from "./report";
 
 export interface CrossVerifyOptions {

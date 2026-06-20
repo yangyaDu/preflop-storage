@@ -8,7 +8,7 @@ import {
   decodeIdxRecordAt,
 } from "../../idx/idx-types";
 import { crc32c } from "../../../binary/crc32c";
-import type { BuildManifest } from "../../importer/build-binary-store";
+import type { BuildManifest } from "../../importer/build-types";
 import { dimensionKey } from "../../db/naming";
 import type { VerifyCheckResult, VerifyFailure } from "../report";
 

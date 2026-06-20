@@ -42,7 +42,7 @@ interface BenchmarkCompareReport {
 
 const args = parseCliArgs(Bun.argv.slice(2));
 const sqliteReportPath = getStringArg(args, "sqlite", "reports/benchmark-sqlite.json");
-const binaryReportPath = getStringArg(args, "binary", "reports/benchmark-binary.json");
+const binaryReportPath = getStringArg(args, "binary", "reports/benchmark-scheme2.json");
 const outPath = getStringArg(args, "out", "reports/benchmark-report.json");
 const mdPath = getStringArg(args, "md", "reports/benchmark-report.md");
 

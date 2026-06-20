@@ -52,7 +52,7 @@ bun test
 执行命令：
 
 ```powershell
-bun run build:scheme2 --source range-db/range.db --out range-db/binary-smoke --dimension default:6:100 --max-packs 3 --overwrite
+bun run build --source range-db/range.db --out range-db/binary-smoke --dimension default:6:100 --max-packs 3 --overwrite
 ```
 
 预期结果：
@@ -154,7 +154,7 @@ bun run check:release
 执行命令：
 
 ```powershell
-bun run query:scheme2 --dir range-db/binary-smoke --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand 22
+bun run query --dir range-db/binary-smoke --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand 22
 ```
 
 预期结果：
@@ -173,7 +173,7 @@ bun run query:scheme2 --dir range-db/binary-smoke --player-count 6 --depth-bb 10
 执行命令：
 
 ```powershell
-bun run query:scheme2 --dir range-db/binary-smoke --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand 22 --verify-checksum
+bun run query --dir range-db/binary-smoke --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand 22 --verify-checksum
 ```
 
 预期结果：
@@ -190,7 +190,7 @@ bun run query:scheme2 --dir range-db/binary-smoke --player-count 6 --depth-bb 10
 执行命令：
 
 ```powershell
-bun run build:scheme2 --source range-db/range.db --out range-db/binary-test-8max --dimension default_8max_100BB --max-packs 2 --overwrite
+bun run build --source range-db/range.db --out range-db/binary-test-8max --dimension default_8max_100BB --max-packs 2 --overwrite
 ```
 
 预期结果：
@@ -207,7 +207,7 @@ bun run build:scheme2 --source range-db/range.db --out range-db/binary-test-8max
 执行命令：
 
 ```powershell
-bun run build:scheme2 --source range-db/range.db --out range-db/binary-smoke --dimension default:6:100 --max-packs 3 --overwrite
+bun run build --source range-db/range.db --out range-db/binary-smoke --dimension default:6:100 --max-packs 3 --overwrite
 ```
 
 预期结果：
@@ -224,7 +224,7 @@ bun run build:scheme2 --source range-db/range.db --out range-db/binary-smoke --d
 执行命令：
 
 ```powershell
-bun run build:scheme2 --source range-db/range.db --out range-db/binary-smoke --dimension default:6:100 --max-packs 3
+bun run build --source range-db/range.db --out range-db/binary-smoke --dimension default:6:100 --max-packs 3
 ```
 
 预期结果：
@@ -241,7 +241,7 @@ bun run build:scheme2 --source range-db/range.db --out range-db/binary-smoke --d
 执行命令：
 
 ```powershell
-bun run query:scheme2 --dir range-db/binary-smoke --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand XX
+bun run query --dir range-db/binary-smoke --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand XX
 ```
 
 预期结果：
@@ -258,7 +258,7 @@ bun run query:scheme2 --dir range-db/binary-smoke --player-count 6 --depth-bb 10
 执行命令：
 
 ```powershell
-bun run query:scheme2 --dir range-db/binary-smoke --player-count 6 --depth-bb 100 --concrete-line-id 999999999 --hand 22
+bun run query --dir range-db/binary-smoke --player-count 6 --depth-bb 100 --concrete-line-id 999999999 --hand 22
 ```
 
 预期结果：
@@ -282,7 +282,7 @@ null
 执行命令示例：
 
 ```powershell
-bun run query:scheme2 --dir range-db/binary-missing-bin --meta range-db/binary-missing-bin/meta.db --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand 22
+bun run query --dir range-db/binary-missing-bin --meta range-db/binary-missing-bin/meta.db --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand 22
 ```
 
 预期结果：
@@ -392,7 +392,7 @@ decoded_hand_ev === null                     // old_hand_ev 为 null 时
 执行命令：
 
 ```powershell
-bun run build:scheme2 --source range-db/range.db --out range-db/binary-scheme2 --overwrite
+bun run build --source range-db/range.db --out range-db/binary-scheme2 --overwrite
 ```
 
 预期结果：
@@ -410,7 +410,7 @@ bun run build:scheme2 --source range-db/range.db --out range-db/binary-scheme2 -
 执行命令：
 
 ```powershell
-bun run benchmark:scheme2:cold `
+bun run benchmark:cold `
   --source range-db/range.db `
   --dir range-db/binary-scheme2 `
   --runs 10 `

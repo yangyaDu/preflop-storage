@@ -7,7 +7,7 @@ import {
   decodeIdxHeader,
   decodeIdxRecordAt,
 } from "../../idx/idx-types";
-import type { BuildManifest, BuildManifestDimension } from "../../importer/build-binary-store";
+import type { BuildManifest, BuildManifestDimension } from "../../importer/build-types";
 import { dimensionKey } from "../../db/naming";
 import type { VerifyCheckResult, VerifyFailure } from "../report";
 
