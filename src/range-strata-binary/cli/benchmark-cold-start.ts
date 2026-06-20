@@ -144,7 +144,7 @@ interface ColdStartBenchmarkReport {
 
 const args = parseCliArgs(Bun.argv.slice(2));
 const sourceDbPath = getStringArg(args, "source", "range-db/range.db");
-const binaryDir = getStringArg(args, "dir", "range-db/binary-scheme2");
+const binaryDir = getStringArg(args, "dir", "range-db/range-strata-binary");
 const metaDbPath = getStringArg(args, "meta", join(binaryDir, "meta.db"));
 const mode = parseMode(getStringArg(args, "mode", "process-cold"));
 const runsPerDimension =
@@ -165,7 +165,7 @@ if (runsPerDimension <= 0 || !Number.isInteger(runsPerDimension)) {
 
 const dimensions = filterRequestedDimensions(readSuccessfulDimensions(binaryDir), requestedDimensions);
 if (dimensions.length === 0) {
-  throw new Error("No successful Scheme2 dimensions were found for cold-start benchmark.");
+  throw new Error("No successful Range Strata Binary dimensions were found for cold-start benchmark.");
 }
 
 const datasetSizeBytes = computeDatasetSize(binaryDir);
@@ -174,8 +174,8 @@ const report = await runColdStartBenchmark(queries, datasetSizeBytes);
 await writeColdStartJson(outPath, report);
 await writeColdStartMarkdown(mdPath, report);
 
-console.log(`Scheme2 cold-start benchmark written: ${outPath}`);
-console.log(`Scheme2 cold-start benchmark markdown written: ${mdPath}`);
+console.log(`Range Strata Binary cold-start benchmark written: ${outPath}`);
+console.log(`Range Strata Binary cold-start benchmark markdown written: ${mdPath}`);
 console.log(`Dimensions: ${report.aggregate.dimensions}, runs: ${report.aggregate.runs}, errors: ${report.aggregate.errorCount}`);
 
 if (report.aggregate.errorCount > 0) {
@@ -631,7 +631,7 @@ function parseQueryOverride(policy: QueryPolicy): { concreteLineId: number; hand
 function readSuccessfulDimensions(dir: string): BuildManifestDimension[] {
   const manifestPath = join(dir, "manifest.json");
   if (!existsSync(manifestPath)) {
-    throw new Error(`manifest.json was not found in ${dir}. Build Scheme2 output first.`);
+    throw new Error(`manifest.json was not found in ${dir}. Build Range Strata Binary output first.`);
   }
 
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as BuildManifest;
@@ -688,7 +688,7 @@ function renderColdStartMarkdown(reportToRender: ColdStartBenchmarkReport): stri
     formatMs(dimension.phaseTimings.processOverheadMs.p95Ms),
   ]);
 
-  return `# Scheme2 Cold-Start Benchmark
+  return `# Range Strata Binary Cold-Start Benchmark
 
 Generated: ${reportToRender.generatedAt}
 
@@ -795,8 +795,8 @@ function buildNotes(): string[] {
   const notes = [
     "Each run starts a fresh Bun worker process and records worker phase timings plus parent-observed process elapsed time.",
     "Default dimension selection uses all successful dimensions from manifest.json, so a full production output should cover all 9 dimensions.",
-    "storeOpenAndFirstQueryMs = Scheme2 store open + dimension prewarm + first query, excluding module/runtime import. Use processElapsedMs or workerTotalMs for end-to-end cold start.",
-    "QueryService/native import includes dynamic import of the Scheme2 query service and native addon loading.",
+    "storeOpenAndFirstQueryMs = Range Strata Binary store open + dimension prewarm + first query, excluding module/runtime import. Use processElapsedMs or workerTotalMs for end-to-end cold start.",
+    "QueryService/native import includes dynamic import of the Range Strata Binary query service and native addon loading.",
     "Dimension prewarm includes opening/mmaping the dimension .idx/.bin files and preloading the action schemas referenced by that dimension.",
     "Parent process overhead is parent-observed process elapsed time minus worker-measured total; it approximates Bun startup/shutdown and IPC overhead.",
     "Phase accounting records the difference between the sum of individual phase timings and workerTotalMs. A discrepancy > 1ms or ratio > 1% should be investigated.",

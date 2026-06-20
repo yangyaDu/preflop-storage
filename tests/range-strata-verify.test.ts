@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { Database } from "bun:sqlite";
-import { buildBinaryStoreScheme2 } from "../src/scheme2/importer/build-binary-store";
-import { runStandaloneVerify } from "../src/scheme2/verify/standalone";
+import { buildRangeStrataBinaryStore } from "../src/range-strata-binary/importer/build-binary-store";
+import { runStandaloneVerify } from "../src/range-strata-binary/verify/standalone";
 const tempDirs: string[] = [];
 
 afterEach(async () => {
@@ -22,7 +22,7 @@ async function buildFixture(
   tempDirs.push(rootDir);
 
   const sourcePath = join(rootDir, "range.db");
-  const outDir = join(rootDir, "binary-scheme2");
+  const outDir = join(rootDir, "range-strata-binary");
   const secondActionName = options.secondActionName ?? "raise";
 
   const db = new Database(sourcePath);
@@ -60,7 +60,7 @@ async function buildFixture(
     db.close();
   }
 
-  await buildBinaryStoreScheme2({
+  await buildRangeStrataBinaryStore({
     sourceDbPath: sourcePath,
     outDir,
     overwrite: true,
@@ -72,7 +72,7 @@ async function buildFixture(
   return { outDir, sourcePath };
 }
 
-describe("Scheme2 standalone verify", () => {
+describe("Range Strata Binary standalone verify", () => {
   test("passes on a clean build output", async () => {
     const { outDir } = await buildFixture();
     const report = await runStandaloneVerify({ dir: outDir, verifyChecksums: false });
@@ -236,16 +236,16 @@ describe("Scheme2 standalone verify", () => {
     expect(jsonContent.totals.manifestOk).toBe(true);
 
     const mdContent = readFileSync(mdPath, "utf-8");
-    expect(mdContent).toContain("Scheme2 Verify Report");
+    expect(mdContent).toContain("Range Strata Binary Verify Report");
     expect(mdContent).toContain("All checks passed");
   });
 });
 
-describe("Scheme2 cross verify", () => {
+describe("Range Strata Binary cross verify", () => {
   test("cross mode sampling passes on clean build", async () => {
     const { outDir, sourcePath } = await buildFixture();
 
-    const { runCrossVerify } = await import("../src/scheme2/verify/cross");
+    const { runCrossVerify } = await import("../src/range-strata-binary/verify/cross");
     const outPath = join(outDir, "cross-report.json");
 
     const report = await runCrossVerify({
@@ -283,7 +283,7 @@ describe("Scheme2 cross verify", () => {
       db.close();
     }
 
-    const { runCrossVerify } = await import("../src/scheme2/verify/cross");
+    const { runCrossVerify } = await import("../src/range-strata-binary/verify/cross");
     const report = await runCrossVerify({
       dir: outDir,
       sourceDbPath: sourcePath,

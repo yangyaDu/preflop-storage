@@ -4,12 +4,12 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildBinaryStoreScheme2 } from "../src/scheme2/importer/build-binary-store";
+import { buildRangeStrataBinaryStore } from "../src/range-strata-binary/importer/build-binary-store";
 import type { BenchmarkRunReport } from "../src/benchmark/common";
 
 const tempDirs: string[] = [];
 const projectRoot = join(import.meta.dir, "..");
-const benchmarkScript = join(projectRoot, "src", "scheme2", "cli", "benchmark-binary.ts");
+const benchmarkScript = join(projectRoot, "src", "range-strata-binary", "cli", "benchmark-binary.ts");
 
 afterEach(async () => {
   while (tempDirs.length > 0) {
@@ -18,7 +18,7 @@ afterEach(async () => {
   }
 });
 
-describe("Scheme2 benchmark output", () => {
+describe("Range Strata Binary benchmark output", () => {
   test("writes stable JSON and Markdown reports with result verification", async () => {
     const { sourcePath, outDir, rootDir } = await buildFixture();
     const jsonPath = join(rootDir, "benchmark.json");
@@ -214,7 +214,7 @@ async function buildFixture(): Promise<{ rootDir: string; sourcePath: string; ou
   tempDirs.push(rootDir);
 
   const sourcePath = join(rootDir, "range.db");
-  const outDir = join(rootDir, "binary-scheme2");
+  const outDir = join(rootDir, "range-strata-binary");
   const db = new Database(sourcePath);
 
   try {
@@ -272,7 +272,7 @@ async function buildFixture(): Promise<{ rootDir: string; sourcePath: string; ou
     db.close();
   }
 
-  await buildBinaryStoreScheme2({
+  await buildRangeStrataBinaryStore({
     sourceDbPath: sourcePath,
     outDir,
     overwrite: true,

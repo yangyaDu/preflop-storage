@@ -1,11 +1,11 @@
-import { buildBinaryStoreScheme2 } from "../importer/build-binary-store";
+import { buildRangeStrataBinaryStore } from "../importer/build-binary-store";
 import { parseCliArgs, getBooleanArg, getNumberArg, getRepeatedStringArgs, getStringArg } from "../../cli/args";
 import { parseDimension } from "../../utils/dimension";
 
 const args = parseCliArgs(Bun.argv.slice(2));
 
 const sourceDbPath = getStringArg(args, "source", "range-db/range.db");
-const outDir = getStringArg(args, "out", "range-db/binary-scheme2");
+const outDir = getStringArg(args, "out", "range-db/range-strata-binary");
 const dimensions = getRepeatedStringArgs(args, "dimension").map(parseDimension);
 const maxConcreteLinesPerDimension = args["max-packs"] === undefined ? undefined : getNumberArg(args, "max-packs");
 const resume = getBooleanArg(args, "resume");
@@ -27,7 +27,7 @@ if (statsOutPath || statsMdPath) {
   console.log(`stats=${statsOutPath ?? "(none)"}  stats-md=${statsMdPath ?? "(none)"}`);
 }
 
-const report = await buildBinaryStoreScheme2({
+const report = await buildRangeStrataBinaryStore({
   sourceDbPath,
   outDir,
   overwrite: getBooleanArg(args, "overwrite"),
@@ -38,7 +38,7 @@ const report = await buildBinaryStoreScheme2({
   statsMdPath,
 });
 
-console.log("scheme2 binary build completed");
+console.log("range-strata-binary build completed");
 if (report.totals.errorCount > 0) {
   process.exitCode = 1;
 }

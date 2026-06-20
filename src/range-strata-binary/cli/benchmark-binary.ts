@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { Scheme2BenchmarkRunner, measureScheme2ColdStart } from "../benchmark/runner";
+import { RangeStrataBenchmarkRunner, measureRangeStrataColdStart } from "../benchmark/runner";
 import {
   buildTotals,
   createBenchmarkWorkload,
@@ -21,10 +21,10 @@ import { quoteIdentifier } from "../../db/naming";
 const args = parseCliArgs(Bun.argv.slice(2));
 
 const sourceDbPath = getStringArg(args, "source", "range-db/range.db");
-const binaryDir = getStringArg(args, "dir", "range-db/binary-scheme2");
+const binaryDir = getStringArg(args, "dir", "range-db/range-strata-binary");
 const metaDbPath = getStringArg(args, "meta", join(binaryDir, "meta.db"));
-const outPath = getStringArg(args, "out", "reports/benchmark-scheme2.json");
-const mdPath = getStringArg(args, "md", "reports/benchmark-scheme2.md");
+const outPath = getStringArg(args, "out", "reports/benchmark-range-strata-binary.json");
+const mdPath = getStringArg(args, "md", "reports/benchmark-range-strata-binary.md");
 const workloadPath = args.workload !== undefined && args.workload !== true ? getStringArg(args, "workload") : undefined;
 const seed = getNumberArg(args, "seed", 42);
 const defaultIterations = getNumberArg(args, "iterations", 1000);
@@ -69,7 +69,7 @@ const runnerOptions = {
 };
 
 // OS cold start with eviction (if requested)
-const coldStart = await measureScheme2ColdStart({
+const coldStart = await measureRangeStrataColdStart({
   metaDbPath,
   binaryDir,
   options: runnerOptions,
@@ -78,7 +78,7 @@ const coldStart = await measureScheme2ColdStart({
 
 // Second cold start measurement WITHOUT eviction for comparison
 const coldStartWarmCache = evictOsCache
-  ? await measureScheme2ColdStart({
+  ? await measureRangeStrataColdStart({
       metaDbPath,
       binaryDir,
       options: { ...runnerOptions, evictOsCache: false },
@@ -86,14 +86,14 @@ const coldStartWarmCache = evictOsCache
     })
   : null;
 const memoryBefore = getMemorySnapshot();
-const runner = new Scheme2BenchmarkRunner(metaDbPath, binaryDir, runnerOptions);
+const runner = new RangeStrataBenchmarkRunner(metaDbPath, binaryDir, runnerOptions);
 
 try {
   runner.warmup(workload.dimensions);
 
   const handCase = await measureBenchmarkCase({
     name: "hand-strategy",
-    description: "Single concrete_line_id + hand query through Scheme2QueryService (idx binary search).",
+    description: "Single concrete_line_id + hand query through RangeStrataQueryService (idx binary search).",
     items: workload.handQueries,
     warmupIterations,
     operation: (item) => runner.getHandStrategy(item),
@@ -101,7 +101,7 @@ try {
 
   const batchCase = await measureBenchmarkCase({
     name: "batch-hand-strategy",
-    description: "Run a batch of concrete_line_id + hand lookups through Scheme2 batch API (sync).",
+    description: "Run a batch of concrete_line_id + hand lookups through Range Strata Binary batch API (sync).",
     items: workload.batchQueries,
     warmupIterations,
     operation: (item) => runner.getHandStrategiesBatchSync(item),
@@ -113,7 +113,7 @@ try {
     batchSizeCases.push(
       await measureBenchmarkCase({
         name: `batch-size-${size}`,
-        description: `Run ${size} lookups per batch through Scheme2 batch API (sync).`,
+        description: `Run ${size} lookups per batch through Range Strata Binary batch API (sync).`,
         items: queries,
         warmupIterations,
         operation: (item) => runner.getHandStrategiesBatchSync(item),
@@ -127,7 +127,7 @@ try {
 
   const notes: string[] = [
     "Cold start includes opening meta.db/idx/bin files and running the first hand query.",
-    "Scheme 2 uses .idx files (mmap + binary search) instead of SQLite range_pack_index tables.",
+    "Range Strata Binary uses .idx files (mmap + binary search) instead of SQLite range_pack_index tables.",
     "Result counts sum decoded action entries so work is consumed rather than only requested.",
   ];
 
@@ -137,7 +137,7 @@ try {
   }
 
   if (prewarmActionSchemas) {
-    notes.push("Action schemas are prewarmed into the Scheme2QueryService cache before hot measurements.");
+    notes.push("Action schemas are prewarmed into the RangeStrataQueryService cache before hot measurements.");
   }
 
   if (coldStart && coldStartWarmCache) {
@@ -194,8 +194,8 @@ try {
   await writeBenchmarkJson(outPath, report);
   await writeBenchmarkMarkdown(mdPath, report);
 
-  console.log(`Scheme2 benchmark written: ${outPath}`);
-  console.log(`Scheme2 benchmark markdown written: ${mdPath}`);
+  console.log(`Range Strata Binary benchmark written: ${outPath}`);
+  console.log(`Range Strata Binary benchmark markdown written: ${mdPath}`);
 
   if (report.totals.errorCount > 0) {
     process.exitCode = 1;
@@ -224,7 +224,7 @@ async function runResultVerification(
     let errorCount = 0;
     const mismatches: string[] = [];
 
-    const runner = new Scheme2BenchmarkRunner(metaDbPath, binaryDir, runnerOptions);
+    const runner = new RangeStrataBenchmarkRunner(metaDbPath, binaryDir, runnerOptions);
     try {
       runner.warmup(workload.dimensions);
 
@@ -246,15 +246,15 @@ async function runResultVerification(
           const sqliteRows = stmt.all(item.concreteLineId, item.holeCards);
           const sqliteCount = sqliteRows.length;
 
-          const scheme2Count = runner.getHandStrategy(item);
+          const rangeStrataCount = runner.getHandStrategy(item);
 
-          if (sqliteCount === scheme2Count) {
+          if (sqliteCount === rangeStrataCount) {
             matchCount++;
           } else {
             mismatchCount++;
             if (mismatches.length < 10) {
               mismatches.push(
-                `${item.strategy}_${item.playerCount}max_${item.depthBb}BB / ${item.concreteLineId} / ${item.holeCards}: SQLite=${sqliteCount}, scheme2=${scheme2Count}`,
+                `${item.strategy}_${item.playerCount}max_${item.depthBb}BB / ${item.concreteLineId} / ${item.holeCards}: SQLite=${sqliteCount}, rangeStrata=${rangeStrataCount}`,
               );
             }
           }

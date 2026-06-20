@@ -4,9 +4,9 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getBinFileName, type RangeDimension } from "../src/db/naming";
-import { getIdxFileName } from "../src/scheme2/db/naming";
-import { cleanupPreviousOutput } from "../src/scheme2/importer/cleanup-output";
-import type { BuildManifest } from "../src/scheme2/importer/build-types";
+import { getIdxFileName } from "../src/range-strata-binary/db/naming";
+import { cleanupPreviousOutput } from "../src/range-strata-binary/importer/cleanup-output";
+import type { BuildManifest } from "../src/range-strata-binary/importer/build-types";
 
 const tempDirs: string[] = [];
 
@@ -18,19 +18,19 @@ afterEach(async () => {
 });
 
 describe("cleanupPreviousOutput", () => {
-  test("removes known Scheme2 output files and leaves unrelated files", async () => {
+  test("removes known Range Strata Binary output files and leaves unrelated files", async () => {
     const { outDir } = await makeTempOutput("preflop-storage-cleanup-known-");
     const dimension = makeDimension(100);
-    const metaPath = join(outDir, "meta.db");
-    const manifestPath = join(outDir, "manifest.json");
+    const metaDbPath = join(outDir, "meta.db");
+    const buildManifestPath = join(outDir, "manifest.json");
     const manifestFile = "extra-report.json";
     const unrelatedFile = join(outDir, "notes.txt");
 
     await writeFiles([
-      metaPath,
-      `${metaPath}-wal`,
-      `${metaPath}-shm`,
-      manifestPath,
+      metaDbPath,
+      `${metaDbPath}-wal`,
+      `${metaDbPath}-shm`,
+      buildManifestPath,
       join(outDir, manifestFile),
       join(outDir, dimension.binFile),
       `${join(outDir, dimension.binFile)}.tmp`,
@@ -40,17 +40,17 @@ describe("cleanupPreviousOutput", () => {
     ]);
 
     await cleanupPreviousOutput({
-      outDir,
-      metaPath,
-      manifestPath,
-      manifest: makeManifest([manifestFile]),
-      dimensions: [dimension],
+      rangeStrataStoreDir: outDir,
+      metaDbPath,
+      buildManifestPath,
+      previousBuildManifest: makeManifest([manifestFile]),
+      targetRangeDimensions: [dimension],
     });
 
-    expect(existsSync(metaPath)).toBe(false);
-    expect(existsSync(`${metaPath}-wal`)).toBe(false);
-    expect(existsSync(`${metaPath}-shm`)).toBe(false);
-    expect(existsSync(manifestPath)).toBe(false);
+    expect(existsSync(metaDbPath)).toBe(false);
+    expect(existsSync(`${metaDbPath}-wal`)).toBe(false);
+    expect(existsSync(`${metaDbPath}-shm`)).toBe(false);
+    expect(existsSync(buildManifestPath)).toBe(false);
     expect(existsSync(join(outDir, manifestFile))).toBe(false);
     expect(existsSync(join(outDir, dimension.binFile))).toBe(false);
     expect(existsSync(`${join(outDir, dimension.binFile)}.tmp`)).toBe(false);
@@ -68,11 +68,11 @@ describe("cleanupPreviousOutput", () => {
     await writeFiles([outsideManifestFile, outsideDimensionFile, absoluteOutsideFile]);
 
     await cleanupPreviousOutput({
-      outDir,
-      metaPath: join(outDir, "meta.db"),
-      manifestPath: join(outDir, "manifest.json"),
-      manifest: makeManifest(["../outside-manifest.bin", absoluteOutsideFile]),
-      dimensions: [
+      rangeStrataStoreDir: outDir,
+      metaDbPath: join(outDir, "meta.db"),
+      buildManifestPath: join(outDir, "manifest.json"),
+      previousBuildManifest: makeManifest(["../outside-manifest.bin", absoluteOutsideFile]),
+      targetRangeDimensions: [
         {
           ...makeDimension(100),
           binFile: "../outside-dimension.bin",

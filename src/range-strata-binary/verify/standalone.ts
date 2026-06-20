@@ -7,7 +7,7 @@ import {
   createReport,
   writeJsonReport,
   writeMdReport,
-  type Scheme2VerifyReport,
+  type RangeStrataVerifyReport,
   type VerifyFailure,
   type DimensionVerifyDetail,
 } from "./report";
@@ -21,7 +21,7 @@ export interface StandaloneVerifyOptions {
   mdPath?: string;
 }
 
-export async function runStandaloneVerify(options: StandaloneVerifyOptions): Promise<Scheme2VerifyReport> {
+export async function runStandaloneVerify(options: StandaloneVerifyOptions): Promise<RangeStrataVerifyReport> {
   const { dir, verifyChecksums } = options;
   const failures: VerifyFailure[] = [];
 
@@ -89,7 +89,7 @@ export async function runStandaloneVerify(options: StandaloneVerifyOptions): Pro
   return report;
 }
 
-function writeReports(report: Scheme2VerifyReport, options: StandaloneVerifyOptions): void {
+function writeReports(report: RangeStrataVerifyReport, options: StandaloneVerifyOptions): void {
   if (options.outPath) {
     try {
       writeJsonReport(report, options.outPath);

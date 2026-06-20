@@ -4,10 +4,10 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
-import { buildBinaryStoreScheme2 } from "../src/scheme2/importer/build-binary-store";
-import { Scheme2QueryService } from "../src/scheme2/query/query-service";
+import { buildRangeStrataBinaryStore } from "../src/range-strata-binary/importer/build-binary-store";
+import { RangeStrataQueryService } from "../src/range-strata-binary/query/query-service";
 import { decodeFileHeader, assertSupportedHeader, RANGE_FILE_HEADER_SIZE } from "../src/binary/file-header";
-import { decodeIdxHeader, assertIdxHeader } from "../src/scheme2/idx/idx-types";
+import { decodeIdxHeader, assertIdxHeader } from "../src/range-strata-binary/idx/idx-types";
 import { PreflopQueryError } from "../src/query/errors";
 
 const tempDirs: string[] = [];
@@ -19,7 +19,7 @@ afterEach(async () => {
   }
 });
 
-describe("Scheme2 build pipeline", () => {
+describe("Range Strata Binary build pipeline", () => {
   test("produces meta.db, .bin, and .idx files", async () => {
     const { outDir } = await buildFixture();
     expect(existsSync(join(outDir, "meta.db"))).toBe(true);
@@ -48,7 +48,7 @@ describe("Scheme2 build pipeline", () => {
 
   test("built .bin CRC32C checksums are valid", async () => {
     const { outDir } = await buildFixture();
-    const service = new Scheme2QueryService(join(outDir, "meta.db"), outDir, {
+    const service = new RangeStrataQueryService(join(outDir, "meta.db"), outDir, {
       verifyChecksums: true,
     });
 
@@ -74,7 +74,7 @@ describe("Scheme2 build pipeline", () => {
       bytes[RANGE_FILE_HEADER_SIZE] ^= 0xff;
     });
 
-    const service = new Scheme2QueryService(join(outDir, "meta.db"), outDir, {
+    const service = new RangeStrataQueryService(join(outDir, "meta.db"), outDir, {
       verifyChecksums: true,
     });
 
@@ -102,7 +102,7 @@ describe("Scheme2 build pipeline", () => {
       bytes[RANGE_FILE_HEADER_SIZE] ^= 0xff;
     });
 
-    const service = new Scheme2QueryService(join(outDir, "meta.db"), outDir, {
+    const service = new RangeStrataQueryService(join(outDir, "meta.db"), outDir, {
       verifyChecksums: true,
     });
 
@@ -134,7 +134,7 @@ describe("Scheme2 build pipeline", () => {
       view.setUint32(16 + 10, RANGE_FILE_HEADER_SIZE - 1, true);
     });
 
-    const service = new Scheme2QueryService(join(outDir, "meta.db"), outDir, {
+    const service = new RangeStrataQueryService(join(outDir, "meta.db"), outDir, {
       verifyChecksums: true,
     });
 
@@ -158,7 +158,7 @@ describe("Scheme2 build pipeline", () => {
   test("async cold query preserves BIN_FILE_NOT_FOUND for missing binary files", async () => {
     const { outDir } = await buildFixture();
     await rm(join(outDir, "ranges_default_6max_100BB.bin"), { force: true });
-    const service = new Scheme2QueryService(join(outDir, "meta.db"), outDir);
+    const service = new RangeStrataQueryService(join(outDir, "meta.db"), outDir);
 
     try {
       let caught: unknown;
@@ -182,7 +182,7 @@ describe("Scheme2 build pipeline", () => {
 
   test("built store queries return correct strategy data", async () => {
     const { outDir } = await buildFixture();
-    const service = new Scheme2QueryService(join(outDir, "meta.db"), outDir);
+    const service = new RangeStrataQueryService(join(outDir, "meta.db"), outDir);
 
     try {
       service.prewarmDimension({ playerCount: 6, depthBb: 100 });
@@ -215,7 +215,7 @@ describe("Scheme2 build pipeline", () => {
 
   test("batch query returns correct results", async () => {
     const { outDir } = await buildFixture();
-    const service = new Scheme2QueryService(join(outDir, "meta.db"), outDir);
+    const service = new RangeStrataQueryService(join(outDir, "meta.db"), outDir);
 
     try {
       service.prewarmDimension({ playerCount: 6, depthBb: 100 });
@@ -240,7 +240,7 @@ describe("Scheme2 build pipeline", () => {
 
   test("hand not in pack returns null strategy", async () => {
     const { outDir } = await buildFixture();
-    const service = new Scheme2QueryService(join(outDir, "meta.db"), outDir);
+    const service = new RangeStrataQueryService(join(outDir, "meta.db"), outDir);
 
     try {
       service.prewarmDimension({ playerCount: 6, depthBb: 100 });
@@ -258,7 +258,7 @@ describe("Scheme2 build pipeline", () => {
 
   test("unknown hand throws UNKNOWN_HAND error", async () => {
     const { outDir } = await buildFixture();
-    const service = new Scheme2QueryService(join(outDir, "meta.db"), outDir);
+    const service = new RangeStrataQueryService(join(outDir, "meta.db"), outDir);
 
     try {
       service.prewarmDimension({ playerCount: 6, depthBb: 100 });
@@ -279,11 +279,11 @@ describe("Scheme2 build pipeline", () => {
   });
 
   test("build without overwrite rejects when meta.db already exists", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "preflop-storage-scheme2-build-overwrite-"));
+    const rootDir = await mkdtemp(join(tmpdir(), "preflop-storage-range-strata-binary-build-overwrite-"));
     tempDirs.push(rootDir);
 
     const sourcePath = join(rootDir, "range.db");
-    const outDir = join(rootDir, "binary-scheme2");
+    const outDir = join(rootDir, "range-strata-binary");
     await mkdir(outDir, { recursive: true });
     // Create a valid SQLite meta.db to simulate pre-existing output
     const dummyDb = new Database(join(outDir, "meta.db"));
@@ -315,28 +315,28 @@ describe("Scheme2 build pipeline", () => {
     }
 
     await expect(
-      buildBinaryStoreScheme2({ sourceDbPath: sourcePath, outDir, overwrite: false }),
+      buildRangeStrataBinaryStore({ sourceDbPath: sourcePath, outDir, overwrite: false }),
     ).rejects.toThrow("Output meta DB already exists");
   });
 
   test("multi-dimensional build produces correct files", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "preflop-storage-scheme2-build-"));
+    const rootDir = await mkdtemp(join(tmpdir(), "preflop-storage-range-strata-binary-build-"));
     tempDirs.push(rootDir);
 
     const { sourcePath, outDir } = createTwoDimensionSource(rootDir);
 
-    await buildBinaryStoreScheme2({ sourceDbPath: sourcePath, outDir, overwrite: true });
+    await buildRangeStrataBinaryStore({ sourceDbPath: sourcePath, outDir, overwrite: true });
 
     expect(existsSync(join(outDir, "ranges_default_6max_100BB.bin"))).toBe(true);
     expect(existsSync(join(outDir, "ranges_default_6max_200BB.bin"))).toBe(true);
   });
 
   test("resume skips successful dimensions and rebuilds failed dimensions", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "preflop-storage-scheme2-resume-"));
+    const rootDir = await mkdtemp(join(tmpdir(), "preflop-storage-range-strata-binary-resume-"));
     tempDirs.push(rootDir);
 
     const { sourcePath, outDir } = createTwoDimensionSource(rootDir);
-    const firstReport = await buildBinaryStoreScheme2({ sourceDbPath: sourcePath, outDir, overwrite: true });
+    const firstReport = await buildRangeStrataBinaryStore({ sourceDbPath: sourcePath, outDir, overwrite: true });
 
     expect(firstReport.totals.errorCount).toBe(0);
     let manifest = JSON.parse(await Bun.file(join(outDir, "manifest.json")).text()) as {
@@ -354,7 +354,7 @@ describe("Scheme2 build pipeline", () => {
     await rm(join(outDir, "ranges_default_6max_200BB.bin"), { force: true });
     await rm(join(outDir, "ranges_default_6max_200BB.idx"), { force: true });
 
-    const resumeReport = await buildBinaryStoreScheme2({ sourceDbPath: sourcePath, outDir, resume: true });
+    const resumeReport = await buildRangeStrataBinaryStore({ sourceDbPath: sourcePath, outDir, resume: true });
     const skippedDimension = resumeReport.dimensions.find((dimension) => dimension.depthBb === 100);
     const rebuiltDimension = resumeReport.dimensions.find((dimension) => dimension.depthBb === 200);
 
@@ -370,11 +370,11 @@ describe("Scheme2 build pipeline", () => {
   });
 
   test("resume rejects when source DB checksum changed", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "preflop-storage-scheme2-resume-checksum-"));
+    const rootDir = await mkdtemp(join(tmpdir(), "preflop-storage-range-strata-binary-resume-checksum-"));
     tempDirs.push(rootDir);
 
     const { sourcePath, outDir } = createTwoDimensionSource(rootDir);
-    await buildBinaryStoreScheme2({ sourceDbPath: sourcePath, outDir, overwrite: true });
+    await buildRangeStrataBinaryStore({ sourceDbPath: sourcePath, outDir, overwrite: true });
 
     const db = new Database(sourcePath);
     try {
@@ -384,16 +384,16 @@ describe("Scheme2 build pipeline", () => {
     }
 
     await expect(
-      buildBinaryStoreScheme2({ sourceDbPath: sourcePath, outDir, resume: true }),
+      buildRangeStrataBinaryStore({ sourceDbPath: sourcePath, outDir, resume: true }),
     ).rejects.toThrow("Source DB checksum differs");
   });
 
   test("overwrite removes files listed by the previous manifest", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "preflop-storage-scheme2-overwrite-clean-"));
+    const rootDir = await mkdtemp(join(tmpdir(), "preflop-storage-range-strata-binary-overwrite-clean-"));
     tempDirs.push(rootDir);
 
     const { sourcePath, outDir } = createTwoDimensionSource(rootDir);
-    await buildBinaryStoreScheme2({ sourceDbPath: sourcePath, outDir, overwrite: true });
+    await buildRangeStrataBinaryStore({ sourceDbPath: sourcePath, outDir, overwrite: true });
 
     const removedBinPath = join(outDir, "ranges_default_6max_200BB.bin");
     const removedIdxPath = join(outDir, "ranges_default_6max_200BB.idx");
@@ -410,7 +410,7 @@ describe("Scheme2 build pipeline", () => {
       db.close();
     }
 
-    await buildBinaryStoreScheme2({ sourceDbPath: sourcePath, outDir, overwrite: true });
+    await buildRangeStrataBinaryStore({ sourceDbPath: sourcePath, outDir, overwrite: true });
 
     expect(existsSync(removedBinPath)).toBe(false);
     expect(existsSync(removedIdxPath)).toBe(false);
@@ -421,7 +421,7 @@ describe("Scheme2 build pipeline", () => {
     const statsOutPath = join(outDir, "reports", "build.json");
     const statsMdPath = join(outDir, "reports", "build.md");
 
-    await buildBinaryStoreScheme2({
+    await buildRangeStrataBinaryStore({
       sourceDbPath: sourcePath,
       outDir,
       overwrite: true,
@@ -436,7 +436,7 @@ describe("Scheme2 build pipeline", () => {
 
     expect(statsJson.totals.dimensionCount).toBe(1);
     expect(statsJson.totals.errorCount).toBe(0);
-    expect(statsMarkdown).toContain("# Scheme2 Build Report");
+    expect(statsMarkdown).toContain("# Range Strata Binary Build Report");
   });
 });
 
@@ -445,7 +445,7 @@ function createTwoDimensionSource(
   options: { secondActionName?: string } = {},
 ): { sourcePath: string; outDir: string } {
   const sourcePath = join(rootDir, "range.db");
-  const outDir = join(rootDir, "binary-scheme2");
+  const outDir = join(rootDir, "range-strata-binary");
   const secondActionName = options.secondActionName ?? "raise";
   const db = new Database(sourcePath);
 
@@ -510,11 +510,11 @@ function createTwoDimensionSource(
 }
 
 async function buildFixture(): Promise<{ outDir: string; sourcePath: string }> {
-  const rootDir = await mkdtemp(join(tmpdir(), "preflop-storage-scheme2-build-"));
+  const rootDir = await mkdtemp(join(tmpdir(), "preflop-storage-range-strata-binary-build-"));
   tempDirs.push(rootDir);
 
   const sourcePath = join(rootDir, "range.db");
-  const outDir = join(rootDir, "binary-scheme2");
+  const outDir = join(rootDir, "range-strata-binary");
   const db = new Database(sourcePath);
 
   try {
@@ -572,7 +572,7 @@ async function buildFixture(): Promise<{ outDir: string; sourcePath: string }> {
     db.close();
   }
 
-  await buildBinaryStoreScheme2({
+  await buildRangeStrataBinaryStore({
     sourceDbPath: sourcePath,
     outDir,
     overwrite: true,

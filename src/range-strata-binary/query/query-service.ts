@@ -66,14 +66,14 @@ export interface ActionSchemaRow {
   checksum: number;
 }
 
-export interface Scheme2QueryServiceOptions {
+export interface RangeStrataQueryServiceOptions {
   verifyChecksums?: boolean;
   prewarmActionSchemas?: boolean;
   /** Maximum number of concurrently open DimensionHandle mmaps. Default 3. */
   maxOpenHandles?: number;
 }
 
-export class Scheme2QueryService {
+export class RangeStrataQueryService {
   private readonly metaDb: Database;
   private readonly handles = new Map<string, DimensionHandle>();
   private readonly actionCache = new Map<number, ActionDef[]>();
@@ -83,7 +83,7 @@ export class Scheme2QueryService {
   constructor(
     metaDbPath: string,
     private readonly binaryDir: string,
-    private readonly options: Scheme2QueryServiceOptions = {},
+    private readonly options: RangeStrataQueryServiceOptions = {},
   ) {
     this.metaDb = new Database(metaDbPath, { readonly: true });
     this.maxOpenHandles = this.options.maxOpenHandles ?? 3;

@@ -1,6 +1,6 @@
 import type { RangeDimension } from "../../db/naming";
 
-export interface BuildBinaryStoreSchema2Options {
+export interface BuildRangeStrataBinaryStoreOptions {
   sourceDbPath: string;
   outDir: string;
   overwrite?: boolean;

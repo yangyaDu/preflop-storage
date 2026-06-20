@@ -1,11 +1,11 @@
-import { Scheme2QueryService } from "../query/query-service";
+import { RangeStrataQueryService } from "../query/query-service";
 import { getBooleanArg, getNumberArg, getStringArg, parseCliArgs } from "../../cli/args";
 
 const args = parseCliArgs(Bun.argv.slice(2));
 
-const binaryDir = getStringArg(args, "dir", "range-db/binary-scheme2");
+const binaryDir = getStringArg(args, "dir", "range-db/range-strata-binary");
 const metaPath = getStringArg(args, "meta", `${binaryDir}/meta.db`);
-const service = new Scheme2QueryService(metaPath, binaryDir, {
+const service = new RangeStrataQueryService(metaPath, binaryDir, {
   verifyChecksums: getBooleanArg(args, "verify-checksum"),
 });
 

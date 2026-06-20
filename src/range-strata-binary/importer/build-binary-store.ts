@@ -21,11 +21,11 @@ import { getIdxFileName } from "../db/naming";
 import { initLightMetaDb } from "../db/schema";
 import { RangeIdxWriter } from "../idx/idx-writer";
 import { resolveBuildPlan } from "./build-plan";
-import type { BuildBinaryStoreSchema2Options, BuildManifest, BuildReport, DimensionBuildStats } from "./build-types";
+import type { BuildRangeStrataBinaryStoreOptions, BuildManifest, BuildReport, DimensionBuildStats } from "./build-types";
 import { cleanupPreviousOutput } from "./cleanup-output";
 
 export type {
-  BuildBinaryStoreSchema2Options,
+  BuildRangeStrataBinaryStoreOptions,
   BuildManifest,
   BuildManifestDimension,
   BuildManifestDimensionStatus,
@@ -41,13 +41,14 @@ interface BuildStatements {
   lastInsertId: ReturnType<Database["prepare"]>;
 }
 
-export async function buildBinaryStoreScheme2(options: BuildBinaryStoreSchema2Options): Promise<BuildReport> {
+export async function buildRangeStrataBinaryStore(options: BuildRangeStrataBinaryStoreOptions): Promise<BuildReport> {
   const buildStart = performance.now();
-  await mkdir(options.outDir, { recursive: true });
+  const rangeStrataStoreDir = options.outDir;
+  await mkdir(rangeStrataStoreDir, { recursive: true });
 
-  const metaPath = join(options.outDir, "meta.db");
-  const manifestPath = join(options.outDir, "manifest.json");
-  const previousManifest = await readBuildManifest(manifestPath);
+  const metaDbPath = join(rangeStrataStoreDir, "meta.db");
+  const buildManifestPath = join(rangeStrataStoreDir, "manifest.json");
+  const previousBuildManifest = await readBuildManifest(buildManifestPath);
 
   // Calculate source DB size
   let sourceDbSizeBytes = 0;
@@ -57,43 +58,53 @@ export async function buildBinaryStoreScheme2(options: BuildBinaryStoreSchema2Op
   } catch { /* ignore */ }
 
   // Compute source DB checksum
-  const sourceDbChecksum = await computeFileSha256(options.sourceDbPath);
+  const sourceRangeDbChecksum = await computeFileSha256(options.sourceDbPath);
 
   const sourceDb = new Database(options.sourceDbPath, { readonly: true });
-  const allDimensions = filterDimensions(discoverRangeDimensions(sourceDb), options.dimensions);
-  const strategies = uniqueStrategies(allDimensions);
-  const buildPlan = await resolveBuildPlan({
-    options,
-    metaPath,
-    previousManifest,
-    sourceDbChecksum,
-    allDimensions,
+  const targetRangeDimensions = filterDimensions(discoverRangeDimensions(sourceDb), options.dimensions);
+  const targetStrategies = uniqueStrategies(targetRangeDimensions);
+  const rangeStrataBuildPlan = await resolveBuildPlan({
+    options: {
+      rangeStrataStoreDir,
+      overwrite: options.overwrite,
+      resume: options.resume,
+    },
+    metaDbPath,
+    previousManifest: previousBuildManifest,
+    sourceRangeDbChecksum,
+    targetRangeDimensions,
   });
 
-  if (buildPlan.shouldCleanupOutput) {
-    await cleanupPreviousOutput({ outDir: options.outDir, metaPath, manifestPath, manifest: previousManifest, dimensions: allDimensions });
+  if (rangeStrataBuildPlan.shouldResetStoreArtifacts) {
+    await cleanupPreviousOutput({
+      rangeStrataStoreDir,
+      metaDbPath,
+      buildManifestPath,
+      previousBuildManifest,
+      targetRangeDimensions,
+    });
   }
-  const { previousCompletedStats, dimensionsToBuild } = buildPlan;
-  const isFreshBuild = buildPlan.mode !== "resume";
+  const { reusableCompletedDimensionStats, pendingRangeDimensions } = rangeStrataBuildPlan;
+  const shouldInitializeMetaDb = rangeStrataBuildPlan.mode !== "resume";
 
-  const metaDb = new Database(metaPath);
+  const metaDb = new Database(metaDbPath);
   let statements: BuildStatements | null = null;
 
   try {
     // Only init meta.db for fresh builds
-    if (isFreshBuild) {
-      initLightMetaDb(metaDb, allDimensions);
+    if (shouldInitializeMetaDb) {
+      initLightMetaDb(metaDb, targetRangeDimensions);
     }
 
-    statements = prepareBuildStatements(metaDb, allDimensions);
+    statements = prepareBuildStatements(metaDb, targetRangeDimensions);
     const schemaIdByKey = new Map<string, number>();
 
     // Copy metadata only on fresh build
-    if (isFreshBuild) {
+    if (shouldInitializeMetaDb) {
       metaDb.exec("BEGIN");
       try {
-        copyDrillScenarioLines({ sourceDb, statements, strategies });
-        for (const dimension of allDimensions) {
+        copyDrillScenarioLines({ sourceDb, statements, strategies: targetStrategies });
+        for (const dimension of targetRangeDimensions) {
           copyConcreteLines({ sourceDb, statements, dimension });
         }
         metaDb.exec("COMMIT");
@@ -104,17 +115,17 @@ export async function buildBinaryStoreScheme2(options: BuildBinaryStoreSchema2Op
     }
 
     // Build dimensions
-    const dimensionStats: DimensionBuildStats[] = [...previousCompletedStats];
+    const dimensionBuildResults: DimensionBuildStats[] = [...reusableCompletedDimensionStats];
 
-    for (const dimension of dimensionsToBuild) {
-      dimensionStats.push(
+    for (const dimension of pendingRangeDimensions) {
+      dimensionBuildResults.push(
         await buildDimensionWithStats({
           sourceDb,
           metaDb,
           statements,
           schemaIdByKey,
           dimension,
-          outDir: options.outDir,
+          rangeStrataStoreDir,
           overwrite: options.overwrite,
           maxConcreteLines: options.maxConcreteLinesPerDimension,
           progressEveryPacks: options.progressEveryPacks ?? 10000,
@@ -125,12 +136,12 @@ export async function buildBinaryStoreScheme2(options: BuildBinaryStoreSchema2Op
     return await writeManifestAndReport({
       options,
       metaDb,
-      metaPath,
-      manifestPath,
-      sourceDbChecksum,
+      metaDbPath,
+      buildManifestPath,
+      sourceRangeDbChecksum,
       sourceDbSizeBytes,
-      allDimensions,
-      dimensionStats,
+      targetRangeDimensions,
+      dimensionBuildResults,
       buildStart,
     });
   } finally {
@@ -144,11 +155,11 @@ function uniqueStrategies(dimensions: RangeDimension[]): string[] {
   return [...new Set(dimensions.map((dimension) => dimension.strategy))];
 }
 
-async function readBuildManifest(manifestPath: string): Promise<BuildManifest | null> {
-  if (!existsSync(manifestPath)) return null;
+async function readBuildManifest(buildManifestPath: string): Promise<BuildManifest | null> {
+  if (!existsSync(buildManifestPath)) return null;
 
   try {
-    return JSON.parse(await Bun.file(manifestPath).text()) as BuildManifest;
+    return JSON.parse(await Bun.file(buildManifestPath).text()) as BuildManifest;
   } catch {
     return null;
   }
@@ -166,7 +177,7 @@ async function buildDimensionWithStats(params: {
   statements: BuildStatements;
   schemaIdByKey: Map<string, number>;
   dimension: RangeDimension;
-  outDir: string;
+  rangeStrataStoreDir: string;
   overwrite?: boolean;
   maxConcreteLines?: number;
   progressEveryPacks: number;
@@ -190,11 +201,11 @@ async function buildDimensionWithStats(params: {
     const result = await buildDimension(params);
 
     try {
-      const binStat = await stat(join(params.outDir, dimension.binFile));
+      const binStat = await stat(join(params.rangeStrataStoreDir, dimension.binFile));
       dimStat.binFileSizeBytes = binStat.size;
     } catch { /* ignore */ }
     try {
-      const idxStat = await stat(join(params.outDir, getIdxFileName(dimension.strategy, dimension.playerCount, dimension.depthBb)));
+      const idxStat = await stat(join(params.rangeStrataStoreDir, getIdxFileName(dimension.strategy, dimension.playerCount, dimension.depthBb)));
       dimStat.idxFileSizeBytes = idxStat.size;
     } catch { /* ignore */ }
 
@@ -210,34 +221,34 @@ async function buildDimensionWithStats(params: {
 }
 
 async function writeManifestAndReport(params: {
-  options: BuildBinaryStoreSchema2Options;
+  options: BuildRangeStrataBinaryStoreOptions;
   metaDb: Database;
-  metaPath: string;
-  manifestPath: string;
-  sourceDbChecksum: string;
+  metaDbPath: string;
+  buildManifestPath: string;
+  sourceRangeDbChecksum: string;
   sourceDbSizeBytes: number;
-  allDimensions: RangeDimension[];
-  dimensionStats: DimensionBuildStats[];
+  targetRangeDimensions: RangeDimension[];
+  dimensionBuildResults: DimensionBuildStats[];
   buildStart: number;
 }): Promise<BuildReport> {
   const {
     options,
     metaDb,
-    metaPath,
-    manifestPath,
-    sourceDbChecksum,
+    metaDbPath,
+    buildManifestPath,
+    sourceRangeDbChecksum,
     sourceDbSizeBytes,
-    allDimensions,
-    dimensionStats,
+    targetRangeDimensions,
+    dimensionBuildResults,
     buildStart,
   } = params;
 
   const manifest: BuildManifest = {
     format: "PFSP",
     version: 1,
-    sourceDbChecksum,
+    sourceDbChecksum: sourceRangeDbChecksum,
     builtAt: new Date().toISOString(),
-    dimensions: dimensionStats.map((s) => ({
+    dimensions: dimensionBuildResults.map((s) => ({
       strategy: s.strategy,
       playerCount: s.playerCount,
       depthBb: s.depthBb,
@@ -253,29 +264,29 @@ async function writeManifestAndReport(params: {
     files: ["meta.db"],
   };
 
-  for (const dim of allDimensions) {
+  for (const dim of targetRangeDimensions) {
     manifest.files.push(getBinFileName(dim.strategy, dim.playerCount, dim.depthBb));
     manifest.files.push(getIdxFileName(dim.strategy, dim.playerCount, dim.depthBb));
   }
 
-  await Bun.write(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+  await Bun.write(buildManifestPath, JSON.stringify(manifest, null, 2) + "\n");
 
   metaDb
     .prepare("INSERT OR REPLACE INTO build_info(key, value) VALUES (?, ?)")
     .run("built_at", manifest.builtAt);
   metaDb
     .prepare("INSERT OR REPLACE INTO build_info(key, value) VALUES (?, ?)")
-    .run("source_checksum", sourceDbChecksum);
+    .run("source_checksum", sourceRangeDbChecksum);
   metaDb.exec("PRAGMA wal_checkpoint(TRUNCATE); PRAGMA journal_mode = DELETE;");
 
   let outputTotalSizeBytes = 0;
   let outputMetaDbSizeBytes = 0;
   try {
-    const ms = await stat(metaPath);
+    const ms = await stat(metaDbPath);
     outputMetaDbSizeBytes = ms.size;
     outputTotalSizeBytes += ms.size;
   } catch { /* ignore */ }
-  for (const s of dimensionStats) {
+  for (const s of dimensionBuildResults) {
     outputTotalSizeBytes += s.binFileSizeBytes + s.idxFileSizeBytes;
   }
 
@@ -288,14 +299,14 @@ async function writeManifestAndReport(params: {
     outputTotalSizeBytes,
     outputMetaDbSizeBytes,
     compressionRatio: sourceDbSizeBytes > 0 ? outputTotalSizeBytes / sourceDbSizeBytes : 0,
-    dimensions: dimensionStats,
+    dimensions: dimensionBuildResults,
     totals: {
-      dimensionCount: allDimensions.length,
-      concreteLineCount: sum(dimensionStats.map((s) => s.concreteLineCount)),
-      packCount: sum(dimensionStats.map((s) => s.packCount)),
-      srcRowCount: sum(dimensionStats.map((s) => s.srcRowCount)),
+      dimensionCount: targetRangeDimensions.length,
+      concreteLineCount: sum(dimensionBuildResults.map((s) => s.concreteLineCount)),
+      packCount: sum(dimensionBuildResults.map((s) => s.packCount)),
+      srcRowCount: sum(dimensionBuildResults.map((s) => s.srcRowCount)),
       totalDurationMs: totalDuration,
-      errorCount: dimensionStats.filter((s) => s.error).length,
+      errorCount: dimensionBuildResults.filter((s) => s.error).length,
     },
   };
 
@@ -447,14 +458,14 @@ async function buildDimension(params: {
   statements: BuildStatements;
   schemaIdByKey: Map<string, number>;
   dimension: RangeDimension;
-  outDir: string;
+  rangeStrataStoreDir: string;
   overwrite?: boolean;
   maxConcreteLines?: number;
   progressEveryPacks: number;
 }): Promise<DimensionBuildResult> {
-  const binBase = join(params.outDir, params.dimension.binFile);
+  const binBase = join(params.rangeStrataStoreDir, params.dimension.binFile);
   const idxBase = join(
-    params.outDir,
+    params.rangeStrataStoreDir,
     getIdxFileName(params.dimension.strategy, params.dimension.playerCount, params.dimension.depthBb),
   );
 
@@ -638,7 +649,7 @@ function renderBuildReportMarkdown(report: BuildReport): string {
     ];
   });
 
-  return `# Scheme2 Build Report
+  return `# Range Strata Binary Build Report
 
 Generated: ${report.generatedAt}
 

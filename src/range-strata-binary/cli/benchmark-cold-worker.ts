@@ -82,7 +82,7 @@ try {
   timings.argsParseMs = performance.now() - argsParseStart;
 
   const queryServiceImportStart = performance.now();
-  const { Scheme2QueryService } = await import("../query/query-service");
+  const { RangeStrataQueryService } = await import("../query/query-service");
   timings.queryServiceImportMs = performance.now() - queryServiceImportStart;
 
   const memoryStart = performance.now();
@@ -90,7 +90,7 @@ try {
   timings.memorySnapshotMs = performance.now() - memoryStart;
 
   const constructorStart = performance.now();
-  service = new Scheme2QueryService(metaDbPath, binaryDir, {
+  service = new RangeStrataQueryService(metaDbPath, binaryDir, {
     verifyChecksums,
   });
   timings.serviceConstructorMs = performance.now() - constructorStart;

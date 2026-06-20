@@ -46,7 +46,7 @@ export interface DimensionVerifyDetail {
 
 // ── Report ────────────────────────────────────────────────────
 
-export interface Scheme2VerifyReport {
+export interface RangeStrataVerifyReport {
   generatedAt: string;
   mode: "standalone" | "cross";
   directory: string;
@@ -94,8 +94,8 @@ export function createReport(
   verifyChecksums: boolean,
   dimensions: DimensionVerifyDetail[],
   failures: VerifyFailure[],
-  extra?: Partial<Pick<Scheme2VerifyReport["totals"], "checkedSourceRecords" | "failedSourceRecords" | "extraBinaryRecords">>,
-): Scheme2VerifyReport {
+  extra?: Partial<Pick<RangeStrataVerifyReport["totals"], "checkedSourceRecords" | "failedSourceRecords" | "extraBinaryRecords">>,
+): RangeStrataVerifyReport {
   const structuralFailures = failures.filter((f) => f.layer !== "source-cross");
   const idxBinCrossFailures = failures.filter((f) => f.layer === "idx-bin-cross");
 
@@ -156,13 +156,13 @@ export function createReport(
   };
 }
 
-export function writeJsonReport(report: Scheme2VerifyReport, outPath: string): void {
+export function writeJsonReport(report: RangeStrataVerifyReport, outPath: string): void {
   writeFileSync(outPath, JSON.stringify(report, null, 2), "utf-8");
 }
 
-export function writeMdReport(report: Scheme2VerifyReport, mdPath: string): void {
+export function writeMdReport(report: RangeStrataVerifyReport, mdPath: string): void {
   const lines: string[] = [
-    `# Scheme2 Verify Report`,
+    `# Range Strata Binary Verify Report`,
     ``,
     `Generated: ${report.generatedAt}`,
     `Mode: ${report.mode}`,

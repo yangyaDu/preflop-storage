@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildBinaryStoreScheme2 } from "../src/scheme2/importer/build-binary-store";
+import { buildRangeStrataBinaryStore } from "../src/range-strata-binary/importer/build-binary-store";
 
 interface ColdStartBenchmarkReport {
   mode: string;
@@ -60,7 +60,7 @@ interface ColdStartBenchmarkReport {
 
 const tempDirs: string[] = [];
 const projectRoot = join(import.meta.dir, "..");
-const coldStartScript = join(projectRoot, "src", "scheme2", "cli", "benchmark-cold-start.ts");
+const coldStartScript = join(projectRoot, "src", "range-strata-binary", "cli", "benchmark-cold-start.ts");
 
 afterEach(async () => {
   while (tempDirs.length > 0) {
@@ -69,7 +69,7 @@ afterEach(async () => {
   }
 });
 
-describe("Scheme2 cold-start benchmark", () => {
+describe("Range Strata Binary cold-start benchmark", () => {
   test("covers every successful manifest dimension by default", async () => {
     const { sourcePath, outDir, rootDir } = await buildFixture();
     const jsonPath = join(rootDir, "cold-start.json");
@@ -132,7 +132,7 @@ describe("Scheme2 cold-start benchmark", () => {
     }
 
     const markdown = await Bun.file(markdownPath).text();
-    expect(markdown).toContain("# Scheme2 Cold-Start Benchmark");
+    expect(markdown).toContain("# Range Strata Binary Cold-Start Benchmark");
     expect(markdown).toContain("## Aggregate Phase Breakdown");
     expect(markdown).toContain("## Dimension Phase Breakdown");
     expect(markdown).toContain("## Failures");
@@ -277,7 +277,7 @@ async function buildFixture(): Promise<{ rootDir: string; sourcePath: string; ou
   tempDirs.push(rootDir);
 
   const sourcePath = join(rootDir, "range.db");
-  const outDir = join(rootDir, "binary-scheme2");
+  const outDir = join(rootDir, "range-strata-binary");
   const db = new Database(sourcePath);
 
   try {
@@ -348,7 +348,7 @@ async function buildFixture(): Promise<{ rootDir: string; sourcePath: string; ou
     db.close();
   }
 
-  await buildBinaryStoreScheme2({
+  await buildRangeStrataBinaryStore({
     sourceDbPath: sourcePath,
     outDir,
     overwrite: true,

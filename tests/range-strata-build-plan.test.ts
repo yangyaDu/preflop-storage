@@ -3,9 +3,9 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getBinFileName, type RangeDimension } from "../src/db/naming";
-import { getIdxFileName } from "../src/scheme2/db/naming";
-import { resolveBuildPlan } from "../src/scheme2/importer/build-plan";
-import type { BuildManifest, BuildManifestDimension, BuildManifestDimensionStatus } from "../src/scheme2/importer/build-types";
+import { getIdxFileName } from "../src/range-strata-binary/db/naming";
+import { resolveBuildPlan } from "../src/range-strata-binary/importer/build-plan";
+import type { BuildManifest, BuildManifestDimension, BuildManifestDimensionStatus } from "../src/range-strata-binary/importer/build-types";
 
 const tempDirs: string[] = [];
 
@@ -22,17 +22,17 @@ describe("resolveBuildPlan", () => {
     const dimensions = [makeDimension(100), makeDimension(200)];
 
     const plan = await resolveBuildPlan({
-      options: { outDir },
-      metaPath: join(outDir, "meta.db"),
+      options: { rangeStrataStoreDir: outDir },
+      metaDbPath: join(outDir, "meta.db"),
       previousManifest: null,
-      sourceDbChecksum: "source-checksum",
-      allDimensions: dimensions,
+      sourceRangeDbChecksum: "source-checksum",
+      targetRangeDimensions: dimensions,
     });
 
     expect(plan.mode).toBe("fresh");
-    expect(plan.shouldCleanupOutput).toBe(true);
-    expect(plan.previousCompletedStats).toEqual([]);
-    expect(depths(plan.dimensionsToBuild)).toEqual([100, 200]);
+    expect(plan.shouldResetStoreArtifacts).toBe(true);
+    expect(plan.reusableCompletedDimensionStats).toEqual([]);
+    expect(depths(plan.pendingRangeDimensions)).toEqual([100, 200]);
   });
 
   test("rejects existing meta.db without resume or overwrite", async () => {
@@ -41,11 +41,11 @@ describe("resolveBuildPlan", () => {
 
     await expect(
       resolveBuildPlan({
-        options: { outDir },
-        metaPath: join(outDir, "meta.db"),
+        options: { rangeStrataStoreDir: outDir },
+        metaDbPath: join(outDir, "meta.db"),
         previousManifest: null,
-        sourceDbChecksum: "source-checksum",
-        allDimensions: [makeDimension(100)],
+        sourceRangeDbChecksum: "source-checksum",
+        targetRangeDimensions: [makeDimension(100)],
       }),
     ).rejects.toThrow("Output meta DB already exists");
   });
@@ -56,11 +56,11 @@ describe("resolveBuildPlan", () => {
 
     await expect(
       resolveBuildPlan({
-        options: { outDir, resume: true },
-        metaPath: join(outDir, "meta.db"),
+        options: { rangeStrataStoreDir: outDir, resume: true },
+        metaDbPath: join(outDir, "meta.db"),
         previousManifest: null,
-        sourceDbChecksum: "source-checksum",
-        allDimensions: [makeDimension(100)],
+        sourceRangeDbChecksum: "source-checksum",
+        targetRangeDimensions: [makeDimension(100)],
       }),
     ).rejects.toThrow("manifest.json is missing or unreadable");
   });
@@ -73,11 +73,11 @@ describe("resolveBuildPlan", () => {
 
     await expect(
       resolveBuildPlan({
-        options: { outDir, resume: true },
-        metaPath: join(outDir, "meta.db"),
+        options: { rangeStrataStoreDir: outDir, resume: true },
+        metaDbPath: join(outDir, "meta.db"),
         previousManifest: makeManifest([makeManifestDimension(dimension)]),
-        sourceDbChecksum: "changed-checksum",
-        allDimensions: [dimension],
+        sourceRangeDbChecksum: "changed-checksum",
+        targetRangeDimensions: [dimension],
       }),
     ).rejects.toThrow("Source DB checksum differs");
   });
@@ -94,21 +94,21 @@ describe("resolveBuildPlan", () => {
     await writeCompletedFiles(outDir, unknown);
 
     const plan = await resolveBuildPlan({
-      options: { outDir, resume: true },
-      metaPath: join(outDir, "meta.db"),
+      options: { rangeStrataStoreDir: outDir, resume: true },
+      metaDbPath: join(outDir, "meta.db"),
       previousManifest: makeManifest([
         makeManifestDimension(completed),
         makeManifestDimension(failed, "failed"),
         makeManifestDimension(unknown),
       ]),
-      sourceDbChecksum: "source-checksum",
-      allDimensions: [completed, failed],
+      sourceRangeDbChecksum: "source-checksum",
+      targetRangeDimensions: [completed, failed],
     });
 
     expect(plan.mode).toBe("resume");
-    expect(plan.shouldCleanupOutput).toBe(false);
-    expect(depths(plan.previousCompletedStats)).toEqual([100]);
-    expect(depths(plan.dimensionsToBuild)).toEqual([200]);
+    expect(plan.shouldResetStoreArtifacts).toBe(false);
+    expect(depths(plan.reusableCompletedDimensionStats)).toEqual([100]);
+    expect(depths(plan.pendingRangeDimensions)).toEqual([200]);
   });
 
   test("does not skip a successful manifest dimension when its file sizes changed", async () => {
@@ -119,17 +119,17 @@ describe("resolveBuildPlan", () => {
     await writeCompletedFiles(outDir, dimension);
 
     const plan = await resolveBuildPlan({
-      options: { outDir, resume: true },
-      metaPath: join(outDir, "meta.db"),
+      options: { rangeStrataStoreDir: outDir, resume: true },
+      metaDbPath: join(outDir, "meta.db"),
       previousManifest: makeManifest([
         makeManifestDimension(dimension, "success", { binFileSizeBytes: 999, idxFileSizeBytes: 2 }),
       ]),
-      sourceDbChecksum: "source-checksum",
-      allDimensions: [dimension],
+      sourceRangeDbChecksum: "source-checksum",
+      targetRangeDimensions: [dimension],
     });
 
-    expect(plan.previousCompletedStats).toEqual([]);
-    expect(depths(plan.dimensionsToBuild)).toEqual([100]);
+    expect(plan.reusableCompletedDimensionStats).toEqual([]);
+    expect(depths(plan.pendingRangeDimensions)).toEqual([100]);
   });
 
   test("overwrite ignores stale manifest state and requests cleanup", async () => {
@@ -138,17 +138,17 @@ describe("resolveBuildPlan", () => {
     await Bun.write(join(outDir, "meta.db"), "");
 
     const plan = await resolveBuildPlan({
-      options: { outDir, overwrite: true, resume: true },
-      metaPath: join(outDir, "meta.db"),
+      options: { rangeStrataStoreDir: outDir, overwrite: true, resume: true },
+      metaDbPath: join(outDir, "meta.db"),
       previousManifest: makeManifest([makeManifestDimension(dimensions[0])], "old-checksum"),
-      sourceDbChecksum: "new-checksum",
-      allDimensions: dimensions,
+      sourceRangeDbChecksum: "new-checksum",
+      targetRangeDimensions: dimensions,
     });
 
     expect(plan.mode).toBe("overwrite");
-    expect(plan.shouldCleanupOutput).toBe(true);
-    expect(plan.previousCompletedStats).toEqual([]);
-    expect(depths(plan.dimensionsToBuild)).toEqual([100, 200]);
+    expect(plan.shouldResetStoreArtifacts).toBe(true);
+    expect(plan.reusableCompletedDimensionStats).toEqual([]);
+    expect(depths(plan.pendingRangeDimensions)).toEqual([100, 200]);
   });
 });
 

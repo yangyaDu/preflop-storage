@@ -17,7 +17,7 @@ function parseMode(value: string): VerifyMode {
 const args = parseCliArgs(Bun.argv.slice(2));
 
 const mode = parseMode(getStringArg(args, "mode", "standalone"));
-const dir = getStringArg(args, "dir", "range-db/binary-scheme2");
+const dir = getStringArg(args, "dir", "range-db/range-strata-binary");
 const sourceDbPath = mode === "cross" ? getStringArg(args, "source", "range-db/range.db") : undefined;
 const verifyChecksums = getBooleanArg(args, "verify-checksum");
 const sampleSize = getNumberArg(args, "sample-size", mode === "cross" ? 10000 : 0);
@@ -27,15 +27,15 @@ const outPath = getStringArg(
   args,
   "out",
   mode === "cross"
-    ? `reports/scheme2-verify-cross.json`
-    : `reports/scheme2-verify-standalone.json`,
+    ? `reports/range-strata-verify-cross.json`
+    : `reports/range-strata-verify-standalone.json`,
 );
 const mdPath = getStringArg(
   args,
   "md",
   mode === "cross"
-    ? `reports/scheme2-verify-cross.md`
-    : `reports/scheme2-verify-standalone.md`,
+    ? `reports/range-strata-verify-cross.md`
+    : `reports/range-strata-verify-standalone.md`,
 );
 
 async function main() {
@@ -47,7 +47,7 @@ async function main() {
       mdPath,
     });
 
-    console.log(`Scheme2 standalone verification complete.`);
+    console.log(`Range Strata Binary standalone verification complete.`);
     console.log(`  Dimensions: ${report.totals.dimensions}`);
     console.log(`  Manifest OK: ${report.totals.manifestOk}`);
     console.log(`  Meta DB OK: ${report.totals.metaDbOk}`);
@@ -81,7 +81,7 @@ async function main() {
       mdPath,
     });
 
-    console.log(`Scheme2 cross verification complete.`);
+    console.log(`Range Strata Binary cross verification complete.`);
     console.log(`  Dimensions: ${report.totals.dimensions}`);
     console.log(`  Manifest OK: ${report.totals.manifestOk}`);
     console.log(`  Meta DB OK: ${report.totals.metaDbOk}`);

@@ -1,4 +1,4 @@
-import { Scheme2QueryService } from "../query/query-service";
+import { RangeStrataQueryService } from "../query/query-service";
 import {
   type BatchBenchmarkItem,
   type ColdStartResult,
@@ -6,7 +6,7 @@ import {
   type HandBenchmarkItem,
 } from "../../benchmark/common";
 
-export interface Scheme2BenchmarkRunnerOptions {
+export interface RangeStrataBenchmarkRunnerOptions {
   verifyChecksums: boolean;
   prewarmActionSchemas?: boolean;
   /** Max concurrently open mmap handles (LRU pool size). Benchmark defaults to a large value. */
@@ -15,17 +15,17 @@ export interface Scheme2BenchmarkRunnerOptions {
   evictOsCache?: boolean;
 }
 
-export class Scheme2BenchmarkRunner {
-  private readonly service: Scheme2QueryService;
-  private readonly options: Scheme2BenchmarkRunnerOptions;
+export class RangeStrataBenchmarkRunner {
+  private readonly service: RangeStrataQueryService;
+  private readonly options: RangeStrataBenchmarkRunnerOptions;
 
   constructor(
     metaDbPath: string,
     binaryDir: string,
-    options: Scheme2BenchmarkRunnerOptions,
+    options: RangeStrataBenchmarkRunnerOptions,
   ) {
     this.options = options;
-    this.service = new Scheme2QueryService(metaDbPath, binaryDir, {
+    this.service = new RangeStrataQueryService(metaDbPath, binaryDir, {
       verifyChecksums: options.verifyChecksums,
       prewarmActionSchemas: options.prewarmActionSchemas,
       maxOpenHandles: options.maxOpenHandles ?? 100,
@@ -119,10 +119,10 @@ export class Scheme2BenchmarkRunner {
   }
 }
 
-export async function measureScheme2ColdStart(params: {
+export async function measureRangeStrataColdStart(params: {
   metaDbPath: string;
   binaryDir: string;
-  options: Scheme2BenchmarkRunnerOptions;
+  options: RangeStrataBenchmarkRunnerOptions;
   item: HandBenchmarkItem | undefined;
 }): Promise<ColdStartResult | null> {
   if (!params.item) return null;
@@ -134,12 +134,12 @@ export async function measureScheme2ColdStart(params: {
 
   const memoryBefore = getMemorySnapshot();
   const start = performance.now();
-  const runner = new Scheme2BenchmarkRunner(params.metaDbPath, params.binaryDir, params.options);
+  const runner = new RangeStrataBenchmarkRunner(params.metaDbPath, params.binaryDir, params.options);
 
   try {
     const resultCount = await runner.getHandStrategyAsync(params.item);
     return {
-      operation: "open meta.db/idx/bin and run first hand query (scheme2)",
+      operation: "open meta.db/idx/bin and run first hand query (range-strata-binary)",
       totalMs: performance.now() - start,
       resultCount,
       memoryBefore,

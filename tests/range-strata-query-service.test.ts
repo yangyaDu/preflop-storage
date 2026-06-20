@@ -3,8 +3,8 @@ import { Database } from "bun:sqlite";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildBinaryStoreScheme2 } from "../src/scheme2/importer/build-binary-store";
-import { Scheme2QueryService } from "../src/scheme2/query/query-service";
+import { buildRangeStrataBinaryStore } from "../src/range-strata-binary/importer/build-binary-store";
+import { RangeStrataQueryService } from "../src/range-strata-binary/query/query-service";
 
 const tempDirs: string[] = [];
 
@@ -15,10 +15,10 @@ afterEach(async () => {
   }
 });
 
-describe("Scheme2QueryService", () => {
-  test("fresh scheme2 build preserves concrete line metadata", async () => {
+describe("RangeStrataQueryService", () => {
+  test("fresh range-strata-binary build preserves concrete line metadata", async () => {
     const { outDir } = await buildFixture();
-    const service = new Scheme2QueryService(join(outDir, "meta.db"), outDir);
+    const service = new RangeStrataQueryService(join(outDir, "meta.db"), outDir);
 
     try {
       const lines = service.getConcreteLines({
@@ -38,7 +38,7 @@ describe("Scheme2QueryService", () => {
 
   test("getHandsByAction works when AA is not present in a sparse pack", async () => {
     const { outDir } = await buildFixture();
-    const service = new Scheme2QueryService(join(outDir, "meta.db"), outDir);
+    const service = new RangeStrataQueryService(join(outDir, "meta.db"), outDir);
 
     try {
       const callHands = await service.getHandsByAction({
@@ -64,7 +64,7 @@ describe("Scheme2QueryService", () => {
 
   test("prewarmActionSchemas fills cache once", async () => {
     const { outDir } = await buildFixture();
-    const service = new Scheme2QueryService(join(outDir, "meta.db"), outDir);
+    const service = new RangeStrataQueryService(join(outDir, "meta.db"), outDir);
 
     try {
       expect(service.prewarmActionSchemas()).toBeGreaterThan(0);
@@ -76,11 +76,11 @@ describe("Scheme2QueryService", () => {
 });
 
 async function buildFixture(): Promise<{ outDir: string }> {
-  const rootDir = await mkdtemp(join(tmpdir(), "preflop-storage-scheme2-"));
+  const rootDir = await mkdtemp(join(tmpdir(), "preflop-storage-range-strata-binary-"));
   tempDirs.push(rootDir);
 
   const sourcePath = join(rootDir, "range.db");
-  const outDir = join(rootDir, "binary-scheme2");
+  const outDir = join(rootDir, "range-strata-binary");
   const db = new Database(sourcePath);
 
   try {
@@ -138,7 +138,7 @@ async function buildFixture(): Promise<{ outDir: string }> {
     db.close();
   }
 
-  await buildBinaryStoreScheme2({
+  await buildRangeStrataBinaryStore({
     sourceDbPath: sourcePath,
     outDir,
     overwrite: true,

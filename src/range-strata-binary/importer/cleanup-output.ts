@@ -5,29 +5,29 @@ import { getIdxFileName } from "../db/naming";
 import type { BuildManifest } from "./build-types";
 
 export async function cleanupPreviousOutput(params: {
-  outDir: string;
-  metaPath: string;
-  manifestPath: string;
-  manifest: BuildManifest | null;
-  dimensions: RangeDimension[];
+  rangeStrataStoreDir: string;
+  metaDbPath: string;
+  buildManifestPath: string;
+  previousBuildManifest: BuildManifest | null;
+  targetRangeDimensions: RangeDimension[];
 }): Promise<void> {
-  const outRoot = resolve(params.outDir);
+  const rangeStrataStoreRoot = resolve(params.rangeStrataStoreDir);
   const paths = new Set<string>([
-    params.metaPath,
-    `${params.metaPath}-wal`,
-    `${params.metaPath}-shm`,
-    params.manifestPath,
+    params.metaDbPath,
+    `${params.metaDbPath}-wal`,
+    `${params.metaDbPath}-shm`,
+    params.buildManifestPath,
   ]);
 
-  for (const file of params.manifest?.files ?? []) {
+  for (const file of params.previousBuildManifest?.files ?? []) {
     if (file === "meta.db") continue;
-    const filePath = resolveOutputPath(outRoot, file);
+    const filePath = resolveOutputPath(rangeStrataStoreRoot, file);
     if (filePath) paths.add(filePath);
   }
 
-  for (const dimension of params.dimensions) {
-    const binFile = resolveOutputPath(outRoot, dimension.binFile);
-    const idxFile = resolveOutputPath(outRoot, getIdxFileName(dimension.strategy, dimension.playerCount, dimension.depthBb));
+  for (const dimension of params.targetRangeDimensions) {
+    const binFile = resolveOutputPath(rangeStrataStoreRoot, dimension.binFile);
+    const idxFile = resolveOutputPath(rangeStrataStoreRoot, getIdxFileName(dimension.strategy, dimension.playerCount, dimension.depthBb));
 
     if (binFile) {
       paths.add(binFile);

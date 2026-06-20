@@ -7,7 +7,7 @@ import { getIdxFileName } from "../db/naming";
 import type { BuildManifest, DimensionBuildStats } from "./build-types";
 
 interface ResolveBuildPlanOptions {
-  outDir: string;
+  rangeStrataStoreDir: string;
   overwrite?: boolean;
   resume?: boolean;
 }
@@ -16,67 +16,67 @@ export type BuildPlanMode = "fresh" | "resume" | "overwrite";
 
 export interface BuildPlan {
   mode: BuildPlanMode;
-  shouldCleanupOutput: boolean;
-  previousCompletedStats: DimensionBuildStats[];
-  dimensionsToBuild: RangeDimension[];
+  shouldResetStoreArtifacts: boolean;
+  reusableCompletedDimensionStats: DimensionBuildStats[];
+  pendingRangeDimensions: RangeDimension[];
 }
 
 export async function resolveBuildPlan(params: {
   options: ResolveBuildPlanOptions;
-  metaPath: string;
+  metaDbPath: string;
   previousManifest: BuildManifest | null;
-  sourceDbChecksum: string;
-  allDimensions: RangeDimension[];
+  sourceRangeDbChecksum: string;
+  targetRangeDimensions: RangeDimension[];
 }): Promise<BuildPlan> {
-  const { options, metaPath, previousManifest, sourceDbChecksum, allDimensions } = params;
-  const metaExists = existsSync(metaPath);
+  const { options, metaDbPath, previousManifest, sourceRangeDbChecksum, targetRangeDimensions } = params;
+  const metaExists = existsSync(metaDbPath);
 
   if (metaExists && !options.overwrite) {
     if (options.resume && previousManifest) {
       // Resume mode can continue with the existing meta.db.
     } else if (options.resume) {
-      throw new PreflopStoreError("BUILD_ERROR", "meta.db exists but manifest.json is missing or unreadable. Pass --overwrite to rebuild from scratch.", { metaPath });
+      throw new PreflopStoreError("BUILD_ERROR", "meta.db exists but manifest.json is missing or unreadable. Pass --overwrite to rebuild from scratch.", { metaDbPath });
     } else {
-      throw new PreflopStoreError("BUILD_ERROR", `Output meta DB already exists: ${metaPath}. Pass --overwrite to rebuild it or --resume to continue.`, { metaPath });
+      throw new PreflopStoreError("BUILD_ERROR", `Output meta DB already exists: ${metaDbPath}. Pass --overwrite to rebuild it or --resume to continue.`, { metaDbPath });
     }
   }
 
   if (options.resume && previousManifest && !options.overwrite) {
-    assertResumeSourceChecksum(previousManifest, sourceDbChecksum);
+    assertResumeSourceChecksum(previousManifest, sourceRangeDbChecksum);
   }
 
-  const isFreshBuild = Boolean(options.overwrite) || !metaExists;
-  const mode: BuildPlanMode = options.overwrite ? "overwrite" : options.resume && !isFreshBuild ? "resume" : "fresh";
-  const knownDimensionKeys = new Set(allDimensions.map((dimension) => manifestDimensionKey(dimension)));
-  const previousCompletedStats = mode === "resume" && previousManifest
-    ? await collectCompletedManifestStats(previousManifest, options.outDir, knownDimensionKeys)
+  const shouldBuildFromCleanStore = Boolean(options.overwrite) || !metaExists;
+  const mode: BuildPlanMode = options.overwrite ? "overwrite" : options.resume && !shouldBuildFromCleanStore ? "resume" : "fresh";
+  const knownDimensionKeys = new Set(targetRangeDimensions.map((dimension) => manifestDimensionKey(dimension)));
+  const reusableCompletedDimensionStats = mode === "resume" && previousManifest
+    ? await collectCompletedManifestStats(previousManifest, options.rangeStrataStoreDir, knownDimensionKeys)
     : [];
-  const completedDimKeys = new Set(previousCompletedStats.map((dimension) => manifestDimensionKey(dimension)));
-  const dimensionsToBuild = mode === "resume"
-    ? allDimensions.filter((dimension) => !completedDimKeys.has(manifestDimensionKey(dimension)))
-    : allDimensions;
+  const completedDimKeys = new Set(reusableCompletedDimensionStats.map((dimension) => manifestDimensionKey(dimension)));
+  const pendingRangeDimensions = mode === "resume"
+    ? targetRangeDimensions.filter((dimension) => !completedDimKeys.has(manifestDimensionKey(dimension)))
+    : targetRangeDimensions;
 
   return {
     mode,
-    shouldCleanupOutput: mode !== "resume",
-    previousCompletedStats,
-    dimensionsToBuild,
+    shouldResetStoreArtifacts: mode !== "resume",
+    reusableCompletedDimensionStats,
+    pendingRangeDimensions,
   };
 }
 
-function assertResumeSourceChecksum(previousManifest: BuildManifest, sourceDbChecksum: string): void {
+function assertResumeSourceChecksum(previousManifest: BuildManifest, sourceRangeDbChecksum: string): void {
   const previousChecksum = previousManifest.sourceDbChecksum;
-  if (!previousChecksum || previousChecksum === "unknown" || sourceDbChecksum === "unknown") {
+  if (!previousChecksum || previousChecksum === "unknown" || sourceRangeDbChecksum === "unknown") {
     return;
   }
 
-  if (previousChecksum !== sourceDbChecksum) {
+  if (previousChecksum !== sourceRangeDbChecksum) {
     throw new PreflopStoreError(
       "BUILD_ERROR",
       "Source DB checksum differs from manifest.json. Refusing --resume because completed dimensions may be stale. Pass --overwrite to rebuild from scratch.",
       {
         manifestChecksum: previousChecksum,
-        sourceDbChecksum,
+        sourceRangeDbChecksum,
       },
     );
   }
@@ -84,7 +84,7 @@ function assertResumeSourceChecksum(previousManifest: BuildManifest, sourceDbChe
 
 async function collectCompletedManifestStats(
   manifest: BuildManifest,
-  outDir: string,
+  rangeStrataStoreDir: string,
   knownDimensionKeys: Set<string>,
 ): Promise<DimensionBuildStats[]> {
   const completed: DimensionBuildStats[] = [];
@@ -95,8 +95,8 @@ async function collectCompletedManifestStats(
 
     const binFile = dimension.binFile ?? getBinFileName(dimension.strategy, dimension.playerCount, dimension.depthBb);
     const idxFile = dimension.idxFile ?? getIdxFileName(dimension.strategy, dimension.playerCount, dimension.depthBb);
-    const binPath = join(outDir, binFile);
-    const idxPath = join(outDir, idxFile);
+    const binPath = join(rangeStrataStoreDir, binFile);
+    const idxPath = join(rangeStrataStoreDir, idxFile);
 
     try {
       const binStat = await stat(binPath);

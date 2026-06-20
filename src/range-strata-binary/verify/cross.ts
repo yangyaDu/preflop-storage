@@ -1,7 +1,7 @@
 import { runStandaloneVerify } from "./standalone";
 import { runSourceCross } from "./checks/source-cross";
 import type { BuildManifest } from "../importer/build-types";
-import { createReport, writeJsonReport, writeMdReport, type Scheme2VerifyReport, type VerifyFailure } from "./report";
+import { createReport, writeJsonReport, writeMdReport, type RangeStrataVerifyReport, type VerifyFailure } from "./report";
 
 export interface CrossVerifyOptions {
   dir: string;
@@ -13,7 +13,7 @@ export interface CrossVerifyOptions {
   mdPath?: string;
 }
 
-export async function runCrossVerify(options: CrossVerifyOptions): Promise<Scheme2VerifyReport> {
+export async function runCrossVerify(options: CrossVerifyOptions): Promise<RangeStrataVerifyReport> {
   const { dir, sourceDbPath, sampleSize, maxFailures, verifyChecksums } = options;
 
   // Step 1: run standalone checks first

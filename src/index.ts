@@ -16,7 +16,7 @@ export * from "./scheme1/db/meta-db";
 export * from "./scheme1/importer/build-binary-store";
 export * from "./scheme1/query/preflop-query-service";
 
-// scheme2 — only export unique types/classes not already in scheme1
-export { Scheme2QueryService, type Scheme2QueryServiceOptions } from "./scheme2/query/query-service";
-export { RangeIdxReader } from "./scheme2/idx/idx-reader";
-export { encodeIdxHeader, decodeIdxHeader, assertIdxHeader, type IdxRecord } from "./scheme2/idx/idx-types";
+// range-strata-binary — only export unique types/classes not already in scheme1
+export { RangeStrataQueryService, type RangeStrataQueryServiceOptions } from "./range-strata-binary/query/query-service";
+export { RangeIdxReader } from "./range-strata-binary/idx/idx-reader";
+export { encodeIdxHeader, decodeIdxHeader, assertIdxHeader, type IdxRecord } from "./range-strata-binary/idx/idx-types";
