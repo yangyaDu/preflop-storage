@@ -1,6 +1,6 @@
 # 项目进度与状态
 
-最后更新：2026-06-19
+最后更新：2026-06-20
 
 这份文档只记录当前已经落地的能力、最近完成的变更，以及下一步还需要继续补强的点。历史方案推演和早期计划已经不再作为主线，当前默认推荐使用 **Scheme2 + Rust**。
 
@@ -19,6 +19,7 @@
 - 查询：`bun run query:scheme2`
 - 校验：`bun run verify:scheme2`
 - 压测：`bun run benchmark:scheme2`
+- 冷启动压测：`bun run benchmark:scheme2:cold`
 
 ## 当前进度总览
 
@@ -34,6 +35,7 @@
 | 查询 SDK 文档 | 已完成 | 见 `docs/query-sdk.md` |
 | 部署/回滚文档 | 已完成 | 见 `docs/deploy-and-rollback.md` |
 | 自动化全量校验（Scheme2 专用） | 已完成 | `verify:scheme2` 支持 standalone 自检 + cross 交叉校验 |
+| OS 冷启动 Benchmark | 已完成 V2 | `benchmark:scheme2:cold` 默认覆盖 manifest 中全部成功维度，生产产物应覆盖 9 个维度。V2 新增：失败隔离、phase accounting、`--query-policy`、`--fail-fast`、父进程 RSS、非零 filler |
 
 ## 最近完成的变更
 
@@ -129,7 +131,80 @@ decoded === Math.fround(source)
 Float32 bits(decoded) === Float32 bits(source)
 ```
 
-### 6. 当前质量状态
+### 6. OS 冷启动 Benchmark V1
+
+新增 `bun run benchmark:scheme2:cold`，用于把 Scheme2 冷启动开销从常规热路径 benchmark 中单独拆出来。
+
+默认行为：
+
+- 从 `range-db/binary-scheme2/manifest.json` 读取全部 `success` 维度。
+- 不传 `--dimension` 时全量覆盖这些维度；当前生产产物应覆盖 `default` 的 `6max/8max/9max` × `100BB/200BB/300BB` 共 9 个维度。
+- 每个维度启动独立 Bun worker 进程，记录 `open meta.db + open idx/bin + first hand query` 的耗时。
+- 支持 `--runs` / `--runs-per-dimension`，例如 9 维度 × 10 runs = 90 次 fresh process 测量。
+- 支持 `--concrete-line-id` + `--hand` 固定查询口径；不传时会从 source DB 为每个维度选择确定性首条查询。
+- 支持 `process-cold`、`os-best-effort`、`linux-drop-cache` 三种模式。
+
+推荐 9 维度命令：
+
+```powershell
+bun run benchmark:scheme2:cold `
+  --source range-db/range.db `
+  --dir range-db/binary-scheme2 `
+  --runs 10 `
+  --concrete-line-id 1 `
+  --hand AA `
+  --mode process-cold
+```
+
+输出：
+
+```text
+reports/benchmark-cold-start.json
+reports/benchmark-cold-start.md
+```
+
+当前 9 维度基线（2026-06-20，本机 Windows，`process-cold`，每维度 10 runs，查询 `concrete_line_id=1 / AA`）：
+
+```text
+维度数：9
+总 runs：90
+错误数：0
+aggregate open+first-query p50 / p95：340.36 ms / 2822.17 ms
+aggregate process elapsed p50 / p95：518.28 ms / 3023.35 ms
+QueryService/native import p50 / p95：27.49 ms / 33.82 ms
+Service constructor(meta.db open) p50 / p95：0.97 ms / 1.37 ms
+Dimension prewarm(idx/bin mmap + schema preload) p50 / p95：338.85 ms / 2820.40 ms
+First query sync decode p50 / p95：0.46 ms / 0.70 ms
+Parent process overhead p50 / p95：122.26 ms / 150.82 ms
+最重维度：default:9max:300BB，dimension prewarm p95 3717.93 ms，process p95 3916.76 ms
+```
+
+当前阶段拆分结论：冷启动慢点几乎全部集中在 `Dimension prewarm`，不是首查 decode，也不是 `meta.db` 打开。下一步优化应优先减少冷启动时的维度级 idx 扫描 / action schema 预加载工作量，或把大维度 handle 预热移到服务启动阶段。
+
+### 6b. OS 冷启动 Benchmark V2 改进
+
+V2 修复了 grilling review 发现的 6 个设计缺陷：
+
+1. **`openAndFirstQueryMs` → `storeOpenAndFirstQueryMs` 重命名**：明确该字段 = Scheme2 store open + dimension prewarm + first query，不含 Bun 运行时/模块加载时间。端到端冷启动应看 `processElapsedMs` 或 `workerTotalMs`。
+2. **失败 run 隔离**：失败 run 的全零 timing 不再污染 latency 聚合（仅 `r.ok` 参与）。每个维度新增 `successCount`、`failures[]` 字段。新增 `--max-errors-per-dimension` 和 `--fail-fast` 韧性控制。
+3. **`os-best-effort` filler 改为非零确定性模式**：避免 OS zero-page dedup。语义降级为「cache perturbation」而非「cache eviction」。报告输出 filler/dataset 比例。
+4. **Phase accounting 校验**：每个 run 计算 `phaseSumMs - workerTotalMs`，输出 `unaccountedMs` 和 `unaccountedRatio`，并在报告中记录最差情况。
+5. **`--query-policy` 查询策略**：支持 `first`（默认，取 source DB 首条查询）和 `fixed`（需 `--concrete-line-id + --hand`）。未来 roadmap：`round-robin`、`random`、`stratified`。
+6. **父进程 RSS 监控**：每个维度完成后采样 `process.memoryUsage().rss`，记录到 `aggregate.parentRssSamples`。
+
+自动化测试：
+
+- `tests/cold-start-benchmark.test.ts` 覆盖默认读取全部成功维度、按 `--dimension` 过滤、`--runs` alias、固定 `concrete_line_id + hand` 查询口径、JSON / Markdown 写出。
+- **新增**：失败隔离测试——删除指定维度 `.bin` 文件，验证该维度 latency 聚合为空，健康维度不受影响，aggregate 仅使用成功 run。
+- 常规测试使用 2 维度 fixture 保持速度；生产运行由真实 manifest 保证 9 维度覆盖。
+
+边界说明：
+
+- `process-cold` 只保证 fresh process，不清理 OS page cache。
+- `os-best-effort` 通过临时大文件扰动文件缓存，便携但不保证严格冷缓存。
+- `linux-drop-cache` 需要 Linux 和足够权限写 `/proc/sys/vm/drop_caches`。
+
+### 7. 当前质量状态
 
 最近一次质量检查结果：
 
@@ -137,7 +212,7 @@ Float32 bits(decoded) === Float32 bits(source)
 - `bun run lint` 通过
 - `bun test` 通过
 - `cargo test --manifest-path native-addon/Cargo.toml` 通过
-- 总计 `119` 个 Bun 测试通过，`19` 个 Rust 测试通过
+- 总计 `121` 个 Bun 测试通过，`19` 个 Rust 测试通过
 
 ## 当前产物与能力
 
@@ -228,6 +303,7 @@ binary-scheme2/
 - 构建统计
 - 部署/回滚说明
 - benchmark 报告
+- OS 冷启动 benchmark
 - 测试覆盖
 - Scheme2 standalone / cross 校验
 - `check:release` 发布前检查脚本
@@ -235,7 +311,7 @@ binary-scheme2/
 后续还建议补强：
 
 - manifest 版本升级策略说明
-- 冷启动和 OS page cache benchmark 的固定发布阈值
+- OS page cache 严格冷缓存模式的固定发布阈值
 
 ## 建议的日常使用顺序
 
@@ -255,7 +331,10 @@ bun run build:scheme2 --source range-db/range.db --out range-db/binary-scheme2 -
 # 5. 发布前额外检查：Bun + Rust + Scheme2 standalone 自检
 bun run check:release
 
-# 6. 查询验证
+# 6. 9 维度 fresh process 冷启动 benchmark
+bun run benchmark:scheme2:cold --source range-db/range.db --dir range-db/binary-scheme2 --runs 10 --concrete-line-id 1 --hand AA --mode process-cold
+
+# 7. 查询验证
 bun run query:scheme2 --dir range-db/binary-scheme2 --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand AA
 ```
 

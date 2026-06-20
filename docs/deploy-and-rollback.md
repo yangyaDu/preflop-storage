@@ -78,6 +78,9 @@ bun run verify:scheme2 --mode cross --source range-db/range.db --dir range-db/bi
 
 # 5. Benchmark — 校验 Scheme2 查询链路可用并抽样比对结果
 bun run benchmark:scheme2 --dir range-db/binary-scheme2 --iterations 1000 --verify-results
+
+# 6. Cold-start Benchmark — 默认覆盖 manifest 中全部成功维度，生产产物应为 9 个维度
+bun run benchmark:scheme2:cold --source range-db/range.db --dir range-db/binary-scheme2 --runs 10 --concrete-line-id 1 --hand AA --mode process-cold
 ```
 
 V1 native addon 构建流程以 Windows 本机为优先支持环境：Windows x64 使用 `x86_64-pc-windows-msvc`，不要使用默认 GNU target。Linux x64 GNU 和 macOS arm64/x64 已保留脚本 target，实际发布前应在对应平台本机执行 `bun run build:native` 与 `bun run check:native`。
@@ -93,6 +96,7 @@ V1 native addon 构建流程以 Windows 本机为优先支持环境：Windows x6
 | Scheme2 cross 校验 | source records failed = 0，extra binary records = 0 |
 | Benchmark | p50 查询时间 ≤ 0.012ms，QPS ≥ 80K |
 | 结果抽样核对 | `benchmark:scheme2 --verify-results` 无 mismatch |
+| Cold-start Benchmark | `benchmark:scheme2:cold` 维度数 = 9，errorCount = 0，记录 p50/p95 作为发布基线 |
 
 精度阈值参考 `docs/float32-precision-spec.md`。
 

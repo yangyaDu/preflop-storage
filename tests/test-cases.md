@@ -401,6 +401,32 @@ bun run build:scheme2 --source range-db/range.db --out range-db/binary-scheme2 -
 - 生成所有维度的 `ranges_*.idx` 和 `ranges_*.bin`。
 - 查询任意已存在维度时可以正常返回策略。
 
+## 用例 16：OS 冷启动 benchmark 覆盖全部维度
+
+测试目标：
+
+验证 cold-start benchmark 默认读取 `manifest.json` 中全部成功维度，生产产物应覆盖 9 个维度，并为每个维度执行相同次数的 fresh process 首查。
+
+执行命令：
+
+```powershell
+bun run benchmark:scheme2:cold `
+  --source range-db/range.db `
+  --dir range-db/binary-scheme2 `
+  --runs 10 `
+  --concrete-line-id 1 `
+  --hand AA `
+  --mode process-cold
+```
+
+预期结果：
+
+- `reports/benchmark-cold-start.json` 与 `reports/benchmark-cold-start.md` 写出。
+- `aggregate.dimensions = 9`。
+- `aggregate.runs = 90`。
+- `aggregate.errorCount = 0`。
+- 每个维度都有 `runs = 10`，并记录 open+first-query p50/p95、进程总耗时 p50/p95、RSS delta。
+
 ## 建议自动化优先级
 
 优先自动化：
@@ -417,3 +443,4 @@ bun run build:scheme2 --source range-db/range.db --out range-db/binary-scheme2 -
 1. 用例 13：旧库与新库精度对比。
 2. 用例 14：action mask 语义。
 3. 用例 15：全量构建。
+4. 用例 16：9 维度 cold-start benchmark。

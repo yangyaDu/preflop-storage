@@ -22,6 +22,7 @@
     "benchmark:sqlite": "bun run src/scheme1/cli/benchmark-sqlite.ts",
     "benchmark:binary": "bun run src/scheme1/cli/benchmark-binary.ts",
     "benchmark:scheme2": "bun run src/scheme2/cli/benchmark-binary.ts",
+    "benchmark:scheme2:cold": "bun run src/scheme2/cli/benchmark-cold-start.ts",
     "benchmark:compare": "bun run src/scheme1/cli/benchmark-compare.ts",
     "benchmark": "bun run benchmark:sqlite && bun run benchmark:binary && bun run benchmark:compare",
     "test": "bun test",
