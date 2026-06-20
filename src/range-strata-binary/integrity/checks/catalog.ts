@@ -1,8 +1,8 @@
 import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { crc32c } from "../../../binary/crc32c";
-import { getConcreteLinesTableName, getDrillScenarioTableName } from "../../db/naming";
-import type { BuildManifest } from "../../importer/build-types";
+import { getConcreteLinesTableName, getDrillScenarioTableName } from "../../catalog/naming";
+import type { BuildManifest } from "../../compiler/types";
 import type { VerifyCheckResult, VerifyFailure } from "../report";
 
 interface SchemaRow {
@@ -13,7 +13,7 @@ interface SchemaRow {
   schema_key: string;
 }
 
-export function checkMetaDb(dir: string, manifest: BuildManifest): VerifyCheckResult {
+export function checkCatalog(dir: string, manifest: BuildManifest): VerifyCheckResult {
   const failures: VerifyFailure[] = [];
   const metaPath = join(dir, "meta.db");
 
@@ -22,7 +22,7 @@ export function checkMetaDb(dir: string, manifest: BuildManifest): VerifyCheckRe
     db = new Database(metaPath, { readonly: true });
   } catch {
     failures.push({
-      layer: "meta-db",
+      layer: "catalog",
       check: "open",
       reason: "IO_ERROR",
       message: `Cannot open meta.db at ${metaPath}`,
@@ -37,7 +37,7 @@ export function checkMetaDb(dir: string, manifest: BuildManifest): VerifyCheckRe
 
     if (!tableNames.has("build_info")) {
       failures.push({
-        layer: "meta-db",
+        layer: "catalog",
         check: "build_info",
         reason: "MISSING_TABLE",
         message: "Required table 'build_info' not found in meta.db",
@@ -50,7 +50,7 @@ export function checkMetaDb(dir: string, manifest: BuildManifest): VerifyCheckRe
       const haveSourceChecksum = buildInfoKeys.some((r) => r.key === "source_checksum" && r.value);
       if (!haveBuiltAt) {
         failures.push({
-          layer: "meta-db",
+          layer: "catalog",
           check: "build_info.built_at",
           reason: "MISSING_ROW",
           message: "build_info missing 'built_at' entry",
@@ -58,7 +58,7 @@ export function checkMetaDb(dir: string, manifest: BuildManifest): VerifyCheckRe
       }
       if (!haveSourceChecksum) {
         failures.push({
-          layer: "meta-db",
+          layer: "catalog",
           check: "build_info.source_checksum",
           reason: "MISSING_ROW",
           message: "build_info missing 'source_checksum' entry",
@@ -69,7 +69,7 @@ export function checkMetaDb(dir: string, manifest: BuildManifest): VerifyCheckRe
     // ── action_schemas table ───────────────────────────────
     if (!tableNames.has("action_schemas")) {
       failures.push({
-        layer: "meta-db",
+        layer: "catalog",
         check: "action_schemas",
         reason: "MISSING_TABLE",
         message: "Required table 'action_schemas' not found in meta.db",
@@ -81,7 +81,7 @@ export function checkMetaDb(dir: string, manifest: BuildManifest): VerifyCheckRe
 
       if (schemas.length === 0) {
         failures.push({
-          layer: "meta-db",
+          layer: "catalog",
           check: "action_schemas",
           reason: "EMPTY",
           message: "action_schemas table is empty",
@@ -99,7 +99,7 @@ export function checkMetaDb(dir: string, manifest: BuildManifest): VerifyCheckRe
         const expectedBlobLen = schema.action_count * 9;
         if (blob.byteLength !== expectedBlobLen) {
           failures.push({
-            layer: "meta-db",
+            layer: "catalog",
             check: "action_schemas",
             reason: "INVALID_FORMAT",
             message: `action_schema id=${schema.id}: blob length ${blob.byteLength} != action_count * 9 (${expectedBlobLen})`,
@@ -109,7 +109,7 @@ export function checkMetaDb(dir: string, manifest: BuildManifest): VerifyCheckRe
         // action_count bounds
         if (schema.action_count < 1 || schema.action_count > 32) {
           failures.push({
-            layer: "meta-db",
+            layer: "catalog",
             check: "action_schemas",
             reason: "INVALID_ARGUMENT",
             message: `action_schema id=${schema.id}: action_count=${schema.action_count} out of range [1, 32]`,
@@ -120,7 +120,7 @@ export function checkMetaDb(dir: string, manifest: BuildManifest): VerifyCheckRe
         const actualChecksum = crc32c(blob);
         if (actualChecksum !== (schema.checksum >>> 0)) {
           failures.push({
-            layer: "meta-db",
+            layer: "catalog",
             check: "action_schemas",
             reason: "CHECKSUM_MISMATCH",
             message: `action_schema id=${schema.id}: stored checksum ${schema.checksum >>> 0} != computed ${actualChecksum}`,
@@ -133,7 +133,7 @@ export function checkMetaDb(dir: string, manifest: BuildManifest): VerifyCheckRe
           .join("");
         if (hex !== schema.schema_key) {
           failures.push({
-            layer: "meta-db",
+            layer: "catalog",
             check: "action_schemas",
             reason: "SCHEMA_KEY_MISMATCH",
             message: `action_schema id=${schema.id}: stored schema_key "${schema.schema_key}" != hex(blob)`,
@@ -152,7 +152,7 @@ export function checkMetaDb(dir: string, manifest: BuildManifest): VerifyCheckRe
       const drillTable = getDrillScenarioTableName(dim.strategy);
       if (!tableNames.has(drillTable)) {
         failures.push({
-          layer: "meta-db",
+          layer: "catalog",
           check: `drill:${dim.strategy}`,
           reason: "MISSING_TABLE",
           message: `Expected drill table "${drillTable}" not found`,
@@ -167,7 +167,7 @@ export function checkMetaDb(dir: string, manifest: BuildManifest): VerifyCheckRe
       const concreteTable = getConcreteLinesTableName(dim.strategy, dim.playerCount, dim.depthBb);
       if (!tableNames.has(concreteTable)) {
         failures.push({
-          layer: "meta-db",
+          layer: "catalog",
           check: `concrete_lines:${dim.strategy}:${dim.playerCount}max:${dim.depthBb}BB`,
           reason: "MISSING_TABLE",
           message: `Expected concrete_lines table "${concreteTable}" not found`,
@@ -183,7 +183,7 @@ export function checkMetaDb(dir: string, manifest: BuildManifest): VerifyCheckRe
 
 /**
  * Extract the set of valid actionSchemaIds from meta.db.
- * Separate function so idx checks can call it independently.
+ * Separate function so index checks can call it independently.
  */
 export function getActionSchemaIds(dir: string): Set<number> {
   const metaPath = join(dir, "meta.db");

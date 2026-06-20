@@ -4,12 +4,12 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildRangeStrataBinaryStore } from "../src/range-strata-binary/importer/build-binary-store";
+import { buildRangeStrataBinaryStore } from "../src/range-strata-binary/compiler/pipeline";
 import type { BenchmarkRunReport } from "../src/benchmark/common";
 
 const tempDirs: string[] = [];
 const projectRoot = join(import.meta.dir, "..");
-const benchmarkScript = join(projectRoot, "src", "range-strata-binary", "cli", "benchmark-binary.ts");
+const benchmarkScript = join(projectRoot, "src", "range-strata-binary", "cli", "benchmark.ts");
 
 afterEach(async () => {
   while (tempDirs.length > 0) {

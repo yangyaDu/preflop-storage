@@ -1,8 +1,8 @@
 import { checkManifestFile, checkFilesExist } from "./checks/manifest";
-import { checkMetaDb } from "./checks/meta-db";
-import { checkIdxStructure } from "./checks/idx-structure";
-import { checkBinStructure } from "./checks/bin-structure";
-import { checkIdxBinCross, type IdxBinCrossOptions } from "./checks/idx-bin-cross";
+import { checkCatalog } from "./checks/catalog";
+import { checkIndexHeader } from "./checks/index-header";
+import { checkPackHeader } from "./checks/pack-header";
+import { checkIndexPackCross, type IndexPackCrossOptions } from "./checks/index-pack-cross";
 import {
   createReport,
   writeJsonReport,
@@ -11,8 +11,8 @@ import {
   type VerifyFailure,
   type DimensionVerifyDetail,
 } from "./report";
-import { collectIdxInfo } from "./checks/idx-structure";
-import { getActionSchemaIds } from "./checks/meta-db";
+import { collectIndexInfo } from "./checks/index-header";
+import { getActionSchemaIds } from "./checks/catalog";
 
 export interface StandaloneVerifyOptions {
   dir: string;
@@ -41,46 +41,46 @@ export async function runStandaloneVerify(options: StandaloneVerifyOptions): Pro
   const fileResults = checkFilesExist(ctx);
   failures.push(...fileResults.failures);
 
-  // ── Step 1: meta.db ───────────────────────────────────────
-  const metaResults = checkMetaDb(ctx.dir, ctx.manifest);
-  failures.push(...metaResults.failures);
+  // ── Step 1: catalog metadata ──────────────────────────────
+  const catalogResults = checkCatalog(ctx.dir, ctx.manifest);
+  failures.push(...catalogResults.failures);
 
   // ── Step 2: action_schema FK set ──────────────────────────
   const validActionSchemaIds = getActionSchemaIds(ctx.dir);
 
-  // ── Step 3: .idx structure ────────────────────────────────
-  const idxResults = checkIdxStructure(ctx.dir, ctx.manifest, validActionSchemaIds);
-  failures.push(...idxResults.failures);
+  // ── Step 3: index header ──────────────────────────────────
+  const indexHeaderResults = checkIndexHeader(ctx.dir, ctx.manifest, validActionSchemaIds);
+  failures.push(...indexHeaderResults.failures);
 
-  // ── Step 4: .bin structure ────────────────────────────────
-  const binResults = checkBinStructure(ctx.dir, ctx.manifest);
-  failures.push(...binResults.failures);
+  // ── Step 4: pack header ───────────────────────────────────
+  const packHeaderResults = checkPackHeader(ctx.dir, ctx.manifest);
+  failures.push(...packHeaderResults.failures);
 
-  // ── Step 5: .idx ↔ .bin cross-reference ───────────────────
-  const crossOptions: IdxBinCrossOptions = { verifyChecksums };
-  const crossResults = checkIdxBinCross(ctx.dir, ctx.manifest, crossOptions);
-  failures.push(...crossResults.failures);
+  // ── Step 5: index ↔ pack cross-reference ──────────────────
+  const crossOptions: IndexPackCrossOptions = { verifyChecksums };
+  const indexPackCrossResults = checkIndexPackCross(ctx.dir, ctx.manifest, crossOptions);
+  failures.push(...indexPackCrossResults.failures);
 
   // ── Build dimension details ───────────────────────────────
-  const idxInfo = collectIdxInfo(ctx.dir, ctx.manifest);
-  const dimensions: DimensionVerifyDetail[] = idxInfo.map((info) => {
+  const indexInfo = collectIndexInfo(ctx.dir, ctx.manifest);
+  const dimensions: DimensionVerifyDetail[] = indexInfo.map((info) => {
     const dimFailures = failures.filter((f) =>
       f.check === `dimension:${info.strategy}:${info.playerCount}max:${info.depthBb}BB`,
     );
-    const binFailures = dimFailures.filter((f) => f.layer === "bin-structure").length;
-    const idxStructFailures = dimFailures.filter((f) => f.layer === "idx-structure").length;
-    const idxBinCrossFailures = dimFailures.filter((f) => f.layer === "idx-bin-cross").length;
+    const binFailures = dimFailures.filter((f) => f.layer === "pack-header").length;
+    const idxStructFailures = dimFailures.filter((f) => f.layer === "index-header").length;
+    const indexPackCrossFailures = dimFailures.filter((f) => f.layer === "index-pack-cross").length;
 
     return {
       strategy: info.strategy,
       playerCount: info.playerCount,
       depthBb: info.depthBb,
       checked: info.recordCount > 0 || dimFailures.some((f) => f.reason !== "MISSING_FILE"),
-      idxRecords: info.recordCount,
+      indexRecords: info.recordCount,
       binFileSizeBytes: 0,
       idxFileSizeBytes: 0,
-      structureFailures: binFailures + idxStructFailures,
-      idxBinCrossFailures,
+      headerFailures: binFailures + idxStructFailures,
+      indexPackCrossFailures,
     };
   });
 

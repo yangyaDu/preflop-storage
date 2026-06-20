@@ -7,11 +7,11 @@ import type { Float32ErrorSample, Float32PrecisionStats } from "../../precision/
 export type VerifyLayer =
   | "file-existence"
   | "manifest"
-  | "meta-db"
-  | "idx-structure"
-  | "bin-structure"
-  | "idx-bin-cross"
-  | "concrete-idx-consistency"
+  | "catalog"
+  | "index-header"
+  | "pack-header"
+  | "index-pack-cross"
+  | "concrete-index-consistency"
   | "source-cross";
 
 export interface VerifyFailure {
@@ -35,11 +35,11 @@ export interface DimensionVerifyDetail {
   depthBb: number;
   /** Whether this dimension was checked at all (status !== "failed" in manifest). */
   checked: boolean;
-  idxRecords: number;
+  indexRecords: number;
   binFileSizeBytes: number;
   idxFileSizeBytes: number;
-  structureFailures: number;
-  idxBinCrossFailures: number;
+  headerFailures: number;
+  indexPackCrossFailures: number;
   sourceCrossFailures?: number;
   sourceCrossRecords?: number;
 }
@@ -68,12 +68,12 @@ export interface RangeStrataVerifyReport {
     dimensions: number;
     // standalone layers
     manifestOk: boolean;
-    metaDbOk: boolean;
-    idxFilesOk: number;
-    idxFilesFailed: number;
-    binFilesOk: number;
-    binFilesFailed: number;
-    idxBinCrossFailures: number;
+    catalogOk: boolean;
+    indexFilesOk: number;
+    indexFilesFailed: number;
+    packFilesOk: number;
+    packFilesFailed: number;
+    indexPackCrossFailures: number;
     // cross layer
     checkedSourceRecords?: number;
     failedSourceRecords?: number;
@@ -97,33 +97,33 @@ export function createReport(
   extra?: Partial<Pick<RangeStrataVerifyReport["totals"], "checkedSourceRecords" | "failedSourceRecords" | "extraBinaryRecords">>,
 ): RangeStrataVerifyReport {
   const structuralFailures = failures.filter((f) => f.layer !== "source-cross");
-  const idxBinCrossFailures = failures.filter((f) => f.layer === "idx-bin-cross");
+  const indexPackCrossFailures = failures.filter((f) => f.layer === "index-pack-cross");
 
   const failedIdxs = new Set<string>();
   const failedBins = new Set<string>();
   for (const f of structuralFailures) {
-    if (f.layer === "idx-structure" || f.layer === "idx-bin-cross") {
+    if (f.layer === "index-header" || f.layer === "index-pack-cross") {
       failedIdxs.add(f.check);
     }
-    if (f.layer === "bin-structure") {
+    if (f.layer === "pack-header") {
       failedBins.add(f.check);
     }
   }
 
   const totalDims = dimensions.length;
   const checkedDims = dimensions.filter((d) => d.checked);
-  const idxFilesOk = checkedDims.filter((d) => {
+  const indexFilesOk = checkedDims.filter((d) => {
     const key = `${d.strategy}:${d.playerCount}max:${d.depthBb}BB`;
-    return d.structureFailures === 0 && !failedIdxs.has(`dimension:${key}`);
+    return d.headerFailures === 0 && !failedIdxs.has(`dimension:${key}`);
   }).length;
-  const idxFilesFailed = checkedDims.length - idxFilesOk;
-  const binFilesOk = checkedDims.filter((d) => {
+  const indexFilesFailed = checkedDims.length - indexFilesOk;
+  const packFilesOk = checkedDims.filter((d) => {
     const key = `${d.strategy}:${d.playerCount}max:${d.depthBb}BB`;
     return !failedBins.has(`dimension:${key}`);
   }).length;
-  const binFilesFailed = checkedDims.length - binFilesOk;
+  const packFilesFailed = checkedDims.length - packFilesOk;
   const manifestFailed = failures.some((f) => f.layer === "manifest" || (f.layer === "file-existence" && f.check === "manifest.json"));
-  const metaDbFailed = failures.some((f) => f.layer === "meta-db" || (f.layer === "file-existence" && f.check === "meta.db"));
+  const catalogFailed = failures.some((f) => f.layer === "catalog" || (f.layer === "file-existence" && f.check === "meta.db"));
 
   return {
     generatedAt: new Date().toISOString(),
@@ -142,12 +142,12 @@ export function createReport(
     totals: {
       dimensions: totalDims,
       manifestOk: !manifestFailed,
-      metaDbOk: !metaDbFailed,
-      idxFilesOk,
-      idxFilesFailed,
-      binFilesOk,
-      binFilesFailed,
-      idxBinCrossFailures: idxBinCrossFailures.length,
+      catalogOk: !catalogFailed,
+      indexFilesOk,
+      indexFilesFailed,
+      packFilesOk,
+      packFilesFailed,
+      indexPackCrossFailures: indexPackCrossFailures.length,
       ...extra,
     },
     dimensions,
@@ -162,7 +162,7 @@ export function writeJsonReport(report: RangeStrataVerifyReport, outPath: string
 
 export function writeMdReport(report: RangeStrataVerifyReport, mdPath: string): void {
   const lines: string[] = [
-    `# Range Strata Binary Verify Report`,
+    `# Range Strata Binary Integrity Report`,
     ``,
     `Generated: ${report.generatedAt}`,
     `Mode: ${report.mode}`,
@@ -175,10 +175,10 @@ export function writeMdReport(report: RangeStrataVerifyReport, mdPath: string): 
       [
         ["Dimensions", formatNumber(report.totals.dimensions)],
         ["Manifest OK", report.totals.manifestOk ? "YES" : "NO"],
-        ["Meta DB OK", report.totals.metaDbOk ? "YES" : "NO"],
-        ["Idx Files OK", `${report.totals.idxFilesOk} / ${report.totals.idxFilesOk + report.totals.idxFilesFailed}`],
-        ["Bin Files OK", `${report.totals.binFilesOk} / ${report.totals.binFilesOk + report.totals.binFilesFailed}`],
-        ["Idx-Bin Cross Failures", report.totals.idxBinCrossFailures],
+        ["Catalog OK", report.totals.catalogOk ? "YES" : "NO"],
+        ["Index Files OK", `${report.totals.indexFilesOk} / ${report.totals.indexFilesOk + report.totals.indexFilesFailed}`],
+        ["Pack Files OK", `${report.totals.packFilesOk} / ${report.totals.packFilesOk + report.totals.packFilesFailed}`],
+        ["Index-Pack Cross Failures", report.totals.indexPackCrossFailures],
         ...(report.mode === "cross"
           ? [
               ["Source Records Checked", report.totals.checkedSourceRecords ?? "N/A"],
@@ -261,15 +261,15 @@ export function writeMdReport(report: RangeStrataVerifyReport, mdPath: string): 
     const dimRows = report.dimensions.map((d) => [
       `${d.strategy}:${d.playerCount}max:${d.depthBb}BB`,
       d.checked ? "YES" : "NO (failed)",
-      d.idxRecords,
-      d.structureFailures,
-      d.idxBinCrossFailures,
+      d.indexRecords,
+      d.headerFailures,
+      d.indexPackCrossFailures,
       d.sourceCrossRecords ?? "-",
       d.sourceCrossFailures ?? "-",
     ]);
     lines.push(
       markdownTable(
-        ["Dimension", "Checked", "Idx Records", "Struct Failures", "Idx-Bin Failures", "Cross Records", "Cross Failures"],
+        ["Dimension", "Checked", "Index Records", "Header Failures", "Index-Pack Failures", "Cross Records", "Cross Failures"],
         dimRows,
       ),
     );
@@ -338,9 +338,9 @@ function getRepairSuggestions(failures: VerifyFailure[]): string[] {
 
   const hasFileMissing = failures.some((f) => f.reason === "MISSING_FILE");
   const hasManifestIssue = failures.some((f) => f.layer === "manifest");
-  const hasMetaDbIssue = failures.some((f) => f.layer === "meta-db");
-  const hasIdxIssue = failures.some((f) => f.layer === "idx-structure" || f.layer === "idx-bin-cross");
-  const hasBinIssue = failures.some((f) => f.layer === "bin-structure");
+  const hasCatalogIssue = failures.some((f) => f.layer === "catalog");
+  const hasIdxIssue = failures.some((f) => f.layer === "index-header" || f.layer === "index-pack-cross");
+  const hasBinIssue = failures.some((f) => f.layer === "pack-header");
   const hasCrossIssue = failures.some((f) => f.layer === "source-cross");
 
   if (hasFileMissing) {
@@ -351,17 +351,17 @@ function getRepairSuggestions(failures: VerifyFailure[]): string[] {
   if (hasManifestIssue) {
     suggestions.push("manifest.json is corrupt or missing required fields. Delete the output directory and re-build from scratch.");
   }
-  if (hasMetaDbIssue) {
-    suggestions.push("meta.db integrity check failed. Delete the output directory and re-build from scratch — meta.db is regenerated during build.");
+  if (hasCatalogIssue) {
+    suggestions.push("catalog integrity check failed. Delete the output directory and re-build from scratch — meta.db is regenerated during build.");
   }
   if (hasIdxIssue) {
     suggestions.push(
-      ".idx file structure or cross-reference failures detected. These files are generated during build — re-run the build to regenerate them.",
+      "Index header or index-pack cross-reference failures detected. These files are generated during build — re-run the build to regenerate them.",
     );
   }
   if (hasBinIssue) {
     suggestions.push(
-      ".bin file structure failures detected. These files are generated during build — re-run the build to regenerate them.",
+      "Pack header failures detected. These files are generated during build — re-run the build to regenerate them.",
     );
   }
   if (hasCrossIssue) {

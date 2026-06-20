@@ -61,8 +61,8 @@ if (actionMasks.length !== handCount) {
 | 层面 | 错误类 | 说明 |
 |------|--------|------|
 | `src/binary/` 格式编解码 | `PreflopStoreError` | 格式校验、CRC 不匹配、版本不兼容 |
-| `src/scheme2/idx/` 索引格式 | `PreflopStoreError` | .idx header 校验 |
-| `src/scheme2/importer/` 构建工具 | `PreflopStoreError` | 构建流程错误 |
+| `src/range-strata-binary/index/` 索引格式 | `PreflopStoreError` | .idx header 校验 |
+| `src/range-strata-binary/compiler/` 构建工具 | `PreflopStoreError` | 构建流程错误 |
 | `src/query/` 查询服务 | `PreflopQueryError` | 手牌未知、pack 未找到等 |
 | `src/cli/` CLI 参数解析 | `Error` | 参数合法性校验（用户直接可读） |
 | `src/benchmark/` 采样逻辑 | `Error` | 数据缺失（采样前校验，表示数据源问题） |
@@ -85,4 +85,4 @@ if (actionMasks.length !== handCount) {
 ## 5. 变更记录
 
 - 2026-06-17：统一各层错误类型。二进制/构建层改用 `PreflopStoreError`，查询层保持 `PreflopQueryError`。内部不变式保留 `Error`。
-- 2026-06-19：Scheme2 Rust 热路径将 checksum mismatch、idx/bin 格式损坏映射为查询层结构化错误；查询错误码新增 `INVALID_FORMAT`。
+- 2026-06-19：Range Strata Binary Rust 热路径将 checksum mismatch、idx/bin 格式损坏映射为查询层结构化错误；查询错误码新增 `INVALID_FORMAT`。

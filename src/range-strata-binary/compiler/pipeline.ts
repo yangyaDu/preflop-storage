@@ -17,12 +17,12 @@ import { discoverRangeDimensions, type OldRangeRow } from "../../importer/old-sq
 import { encodeConcreteLinePack, toHex } from "../../importer/encode-pack";
 import { PreflopStoreError } from "../../query/errors";
 import { filterDimensions } from "../../utils/dimension";
-import { getIdxFileName } from "../db/naming";
-import { initLightMetaDb } from "../db/schema";
-import { RangeIdxWriter } from "../idx/idx-writer";
-import { resolveBuildPlan } from "./build-plan";
-import type { BuildRangeStrataBinaryStoreOptions, BuildManifest, BuildReport, DimensionBuildStats } from "./build-types";
-import { cleanupPreviousOutput } from "./cleanup-output";
+import { getIdxFileName } from "../catalog/naming";
+import { initLightMetaDb } from "../catalog/schema";
+import { RangeIdxWriter } from "../index/writer";
+import { resolveBuildPlan } from "./plan";
+import type { BuildRangeStrataBinaryStoreOptions, BuildManifest, BuildReport, DimensionBuildStats } from "./types";
+import { cleanupPreviousOutput } from "./cleanup";
 
 export type {
   BuildRangeStrataBinaryStoreOptions,
@@ -31,7 +31,7 @@ export type {
   BuildManifestDimensionStatus,
   BuildReport,
   DimensionBuildStats,
-} from "./build-types";
+} from "./types";
 
 interface BuildStatements {
   insertDrillLineByStrategy: Map<string, ReturnType<Database["prepare"]>>;

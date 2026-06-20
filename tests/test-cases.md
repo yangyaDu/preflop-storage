@@ -7,9 +7,9 @@
 主要测试对象：
 
 - `src/binary/`：二进制 header、action schema、range pack、CRC32C。
-- `src/scheme2/importer/`：旧 SQLite 到 `meta.db + .idx + .bin` 的主构建流程。
-- `src/scheme2/query/`：Scheme2 + Rust 热路径查询服务。
-- `src/scheme2/cli/`：Scheme2 构建、查询、校验和 benchmark 命令。
+- `src/range-strata-binary/compiler/`：旧 SQLite 到 `meta.db + .idx + .bin` 的主构建流程。
+- `src/range-strata-binary/query/`：Range Strata Binary + Rust 热路径查询服务。
+- `src/range-strata-binary/cli/`：Range Strata Binary 构建、查询、校验和 benchmark 命令。
 
 ## 测试环境
 
@@ -58,7 +58,7 @@ bun run build --source range-db/range.db --out range-db/binary-smoke --dimension
 预期结果：
 
 - 命令正常结束。
-- 输出 `scheme2 binary build completed`。
+- 输出 `Range Strata Binary build completed`。
 - `range-db/binary-smoke/` 下生成：
 
 ```text
@@ -123,11 +123,11 @@ bun run check
 
 测试目标：
 
-验证 Bun 质量检查、Rust 原生插件测试和 Scheme2 standalone 自检可以形成发布前检查闭环。
+验证 Bun 质量检查、Rust 原生插件测试和 Range Strata Binary standalone 自检可以形成发布前检查闭环。
 
 前置条件：
 
-已构建 `range-db/binary-scheme2`。
+已构建 `range-db/range-strata-binary`。
 
 执行命令：
 
@@ -139,7 +139,7 @@ bun run check:release
 
 - TypeScript、ESLint、Bun 测试通过。
 - Rust `cargo test` 通过。
-- Scheme2 standalone + CRC 校验通过。
+- Range Strata Binary standalone + CRC 校验通过。
 
 ## 用例 3：查询单手牌策略
 
@@ -294,14 +294,14 @@ bun run query --dir range-db/binary-missing-bin --meta range-db/binary-missing-b
 
 测试目标：
 
-验证 `Scheme2QueryService.getHandsByAction()` 不传 `actionNames` 时可以返回 pack 中所有手牌。
+验证 `Range Strata BinaryQueryService.getHandsByAction()` 不传 `actionNames` 时可以返回 pack 中所有手牌。
 
 示例代码：
 
 ```ts
-import { Scheme2QueryService } from "../src/scheme2/query/query-service";
+import { Range Strata BinaryQueryService } from "../src/range-strata-binary/query/service";
 
-const service = new Scheme2QueryService("range-db/binary-smoke/meta.db", "range-db/binary-smoke");
+const service = new Range Strata BinaryQueryService("range-db/binary-smoke/meta.db", "range-db/binary-smoke");
 
 const result = await service.getHandsByAction({
   strategy: "default",
@@ -392,7 +392,7 @@ decoded_hand_ev === null                     // old_hand_ev 为 null 时
 执行命令：
 
 ```powershell
-bun run build --source range-db/range.db --out range-db/binary-scheme2 --overwrite
+bun run build --source range-db/range.db --out range-db/range-strata-binary --overwrite
 ```
 
 预期结果：
@@ -412,7 +412,7 @@ bun run build --source range-db/range.db --out range-db/binary-scheme2 --overwri
 ```powershell
 bun run benchmark:cold `
   --source range-db/range.db `
-  --dir range-db/binary-scheme2 `
+  --dir range-db/range-strata-binary `
   --runs 10 `
   --concrete-line-id 1 `
   --hand AA `

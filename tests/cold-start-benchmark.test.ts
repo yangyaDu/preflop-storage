@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildRangeStrataBinaryStore } from "../src/range-strata-binary/importer/build-binary-store";
+import { buildRangeStrataBinaryStore } from "../src/range-strata-binary/compiler/pipeline";
 
 interface ColdStartBenchmarkReport {
   mode: string;
@@ -60,7 +60,7 @@ interface ColdStartBenchmarkReport {
 
 const tempDirs: string[] = [];
 const projectRoot = join(import.meta.dir, "..");
-const coldStartScript = join(projectRoot, "src", "range-strata-binary", "cli", "benchmark-cold-start.ts");
+const coldStartScript = join(projectRoot, "src", "range-strata-binary", "cli", "cold-benchmark.ts");
 
 afterEach(async () => {
   while (tempDirs.length > 0) {

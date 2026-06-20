@@ -5,18 +5,18 @@ import {
   decodeFileHeader,
   assertSupportedHeader,
 } from "../../../binary/file-header";
-import type { BuildManifest } from "../../importer/build-types";
-import { dimensionKey } from "../../db/naming";
+import type { BuildManifest } from "../../compiler/types";
+import { dimensionKey } from "../../catalog/naming";
 import type { VerifyCheckResult, VerifyFailure } from "../report";
 
-export function checkBinStructure(dir: string, manifest: BuildManifest): VerifyCheckResult {
+export function checkPackHeader(dir: string, manifest: BuildManifest): VerifyCheckResult {
   const failures: VerifyFailure[] = [];
 
   for (const dim of manifest.dimensions) {
     if (dim.status === "failed") continue;
     if (!dim.binFile) {
       failures.push({
-        layer: "bin-structure",
+        layer: "pack-header",
         check: `dimension:${dimensionKey(dim)}`,
         reason: "MISSING_FILE",
         message: `manifest.dimensions entry for ${dimensionKey(dim)} has no binFile`,
@@ -29,7 +29,7 @@ export function checkBinStructure(dir: string, manifest: BuildManifest): VerifyC
       const fileStat = statSync(binPath);
       if (fileStat.size < RANGE_FILE_HEADER_SIZE) {
         failures.push({
-          layer: "bin-structure",
+          layer: "pack-header",
           check: `dimension:${dimensionKey(dim)}`,
           reason: "TRUNCATED",
           message: `.bin file ${dim.binFile} is too small (${fileStat.size} bytes, min ${RANGE_FILE_HEADER_SIZE})`,
@@ -43,7 +43,7 @@ export function checkBinStructure(dir: string, manifest: BuildManifest): VerifyC
       assertSupportedHeader(header);
     } catch (e) {
       failures.push({
-        layer: "bin-structure",
+        layer: "pack-header",
         check: `dimension:${dimensionKey(dim)}`,
         reason: "INVALID_HEADER",
         message: `.bin file ${dim.binFile}: ${e instanceof Error ? e.message : String(e)}`,

@@ -19,13 +19,13 @@ import {
   formatFloat32Bits,
   type Float32PrecisionStats,
 } from "../../../precision/float32";
-import type { BuildManifest } from "../../importer/build-types";
+import type { BuildManifest } from "../../compiler/types";
 import {
   IDX_HEADER_SIZE,
   IDX_RECORD_SIZE,
   decodeIdxHeader,
   decodeIdxRecordAt,
-} from "../../idx/idx-types";
+} from "../../index/types";
 import type { VerifyFailure } from "../report";
 
 const ACTION_VALUE_TOLERANCE = 1e-6;

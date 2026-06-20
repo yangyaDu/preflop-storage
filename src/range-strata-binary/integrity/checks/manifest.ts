@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import type { BuildManifest } from "../../importer/build-types";
-import { dimensionKey } from "../../db/naming";
+import type { BuildManifest } from "../../compiler/types";
+import { dimensionKey } from "../../catalog/naming";
 import type { VerifyCheckResult, VerifyFailure } from "../report";
 
 const MANIFEST_EXPECTED_FORMAT = "PFSP";

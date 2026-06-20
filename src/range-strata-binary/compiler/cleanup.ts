@@ -1,8 +1,8 @@
 import { rm } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { RangeDimension } from "../../db/naming";
-import { getIdxFileName } from "../db/naming";
-import type { BuildManifest } from "./build-types";
+import { getIdxFileName } from "../catalog/naming";
+import type { BuildManifest } from "./types";
 
 export async function cleanupPreviousOutput(params: {
   rangeStrataStoreDir: string;

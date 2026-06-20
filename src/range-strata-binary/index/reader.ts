@@ -5,7 +5,7 @@ import {
   IDX_HEADER_SIZE,
   IDX_RECORD_SIZE,
   type IdxRecord,
-} from "./idx-types";
+} from "./types";
 
 /**
  * RangeIdxReader — mmap .idx 文件，通过 DataView 二分查找实现 O(log n) 查询。

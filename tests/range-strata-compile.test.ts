@@ -4,10 +4,10 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
-import { buildRangeStrataBinaryStore } from "../src/range-strata-binary/importer/build-binary-store";
-import { RangeStrataQueryService } from "../src/range-strata-binary/query/query-service";
+import { buildRangeStrataBinaryStore } from "../src/range-strata-binary/compiler/pipeline";
+import { RangeStrataQueryService } from "../src/range-strata-binary/query/service";
 import { decodeFileHeader, assertSupportedHeader, RANGE_FILE_HEADER_SIZE } from "../src/binary/file-header";
-import { decodeIdxHeader, assertIdxHeader } from "../src/range-strata-binary/idx/idx-types";
+import { decodeIdxHeader, assertIdxHeader } from "../src/range-strata-binary/index/types";
 import { PreflopQueryError } from "../src/query/errors";
 
 const tempDirs: string[] = [];

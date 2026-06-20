@@ -4,8 +4,8 @@ import {
   getStringArg,
   parseCliArgs,
 } from "../../cli/args";
-import { runStandaloneVerify } from "../verify/standalone";
-import { runCrossVerify } from "../verify/cross";
+import { runStandaloneVerify } from "../integrity/self-check";
+import { runCrossVerify } from "../integrity/cross-check";
 
 type VerifyMode = "standalone" | "cross";
 
@@ -50,18 +50,18 @@ async function main() {
     console.log(`Range Strata Binary standalone verification complete.`);
     console.log(`  Dimensions: ${report.totals.dimensions}`);
     console.log(`  Manifest OK: ${report.totals.manifestOk}`);
-    console.log(`  Meta DB OK: ${report.totals.metaDbOk}`);
-    console.log(`  Idx files OK: ${report.totals.idxFilesOk}/${report.totals.idxFilesOk + report.totals.idxFilesFailed}`);
-    console.log(`  Bin files OK: ${report.totals.binFilesOk}/${report.totals.binFilesOk + report.totals.binFilesFailed}`);
-    console.log(`  Idx-Bin cross failures: ${report.totals.idxBinCrossFailures}`);
+    console.log(`  Catalog OK: ${report.totals.catalogOk}`);
+    console.log(`  Index files OK: ${report.totals.indexFilesOk}/${report.totals.indexFilesOk + report.totals.indexFilesFailed}`);
+    console.log(`  Pack files OK: ${report.totals.packFilesOk}/${report.totals.packFilesOk + report.totals.packFilesFailed}`);
+    console.log(`  Index-Pack cross failures: ${report.totals.indexPackCrossFailures}`);
     console.log(`  Total failures: ${report.failures.length}`);
 
     const hasFailure =
       !report.totals.manifestOk ||
-      !report.totals.metaDbOk ||
-      report.totals.idxFilesFailed > 0 ||
-      report.totals.binFilesFailed > 0 ||
-      report.totals.idxBinCrossFailures > 0;
+      !report.totals.catalogOk ||
+      report.totals.indexFilesFailed > 0 ||
+      report.totals.packFilesFailed > 0 ||
+      report.totals.indexPackCrossFailures > 0;
 
     if (hasFailure) {
       process.exitCode = 1;
@@ -84,8 +84,8 @@ async function main() {
     console.log(`Range Strata Binary cross verification complete.`);
     console.log(`  Dimensions: ${report.totals.dimensions}`);
     console.log(`  Manifest OK: ${report.totals.manifestOk}`);
-    console.log(`  Meta DB OK: ${report.totals.metaDbOk}`);
-    console.log(`  Idx files OK: ${report.totals.idxFilesOk}/${report.totals.idxFilesOk + report.totals.idxFilesFailed}`);
+    console.log(`  Catalog OK: ${report.totals.catalogOk}`);
+    console.log(`  Index files OK: ${report.totals.indexFilesOk}/${report.totals.indexFilesOk + report.totals.indexFilesFailed}`);
     console.log(`  Source records checked: ${report.totals.checkedSourceRecords ?? "N/A"}`);
     console.log(`  Source records failed: ${report.totals.failedSourceRecords ?? "N/A"}`);
     console.log(`  Extra binary records: ${report.totals.extraBinaryRecords ?? "N/A"}`);
@@ -93,9 +93,9 @@ async function main() {
 
     const hasFailure =
       !report.totals.manifestOk ||
-      !report.totals.metaDbOk ||
-      report.totals.idxFilesFailed > 0 ||
-      report.totals.binFilesFailed > 0 ||
+      !report.totals.catalogOk ||
+      report.totals.indexFilesFailed > 0 ||
+      report.totals.packFilesFailed > 0 ||
       (report.totals.failedSourceRecords ?? 0) > 0 ||
       (report.totals.extraBinaryRecords ?? 0) > 0;
 

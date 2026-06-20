@@ -1,4 +1,4 @@
-import { buildRangeStrataBinaryStore } from "../importer/build-binary-store";
+import { buildRangeStrataBinaryStore } from "../compiler/pipeline";
 import { parseCliArgs, getBooleanArg, getNumberArg, getRepeatedStringArgs, getStringArg } from "../../cli/args";
 import { parseDimension } from "../../utils/dimension";
 

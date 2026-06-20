@@ -1,4 +1,4 @@
-import { RangeStrataQueryService } from "../query/query-service";
+import { RangeStrataQueryService } from "../query/service";
 import {
   type BatchBenchmarkItem,
   type ColdStartResult,

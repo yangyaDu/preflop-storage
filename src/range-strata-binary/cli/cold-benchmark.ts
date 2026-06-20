@@ -7,7 +7,7 @@ import { formatBytes, markdownTable } from "../../analysis/format";
 import { getBooleanArg, getNumberArg, getRepeatedStringArgs, getStringArg, parseCliArgs } from "../../cli/args";
 import { dimensionKey, quoteIdentifier } from "../../db/naming";
 import { parseRequestedDimension, type MemorySnapshot } from "../../benchmark/common";
-import type { BuildManifest, BuildManifestDimension } from "../importer/build-types";
+import type { BuildManifest, BuildManifestDimension } from "../compiler/types";
 
 type ColdStartMode = "process-cold" | "os-best-effort" | "linux-drop-cache";
 type QueryPolicy = "first" | "fixed";
@@ -251,7 +251,7 @@ async function runWorker(
   runIndex: number,
   eviction: EvictionResult,
 ): Promise<ColdStartRunResult> {
-  const workerPath = join(import.meta.dir, "benchmark-cold-worker.ts");
+  const workerPath = join(import.meta.dir, "cold-worker.ts");
   const command = [
     process.execPath,
     workerPath,

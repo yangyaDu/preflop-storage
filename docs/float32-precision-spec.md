@@ -133,6 +133,6 @@ Float32 主存储 + 少量 exception delta 表
 ## 7. 相关实现
 
 - `src/precision/float32.ts`：Float32 bit-exact 校验、bits 转换、量化误差统计
-- `src/scheme2/verify/checks/source-cross.ts`：source DB 与 Scheme2 产物的 bit-exact cross verify
+- `src/range-strata-binary/integrity/checks/source-cross.ts`：source DB 与 Range Strata Binary 产物的 bit-exact cross verify
 - `tests/float32-precision.test.ts`：Float32 精度工具测试
-- `tests/scheme2-verify.test.ts`：cross verify 精度边界测试
+- `tests/range-strata-verify.test.ts`：cross verify 精度边界测试

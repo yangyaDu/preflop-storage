@@ -3,9 +3,9 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getBinFileName, type RangeDimension } from "../src/db/naming";
-import { getIdxFileName } from "../src/range-strata-binary/db/naming";
-import { resolveBuildPlan } from "../src/range-strata-binary/importer/build-plan";
-import type { BuildManifest, BuildManifestDimension, BuildManifestDimensionStatus } from "../src/range-strata-binary/importer/build-types";
+import { getIdxFileName } from "../src/range-strata-binary/catalog/naming";
+import { resolveBuildPlan } from "../src/range-strata-binary/compiler/plan";
+import type { BuildManifest, BuildManifestDimension, BuildManifestDimensionStatus } from "../src/range-strata-binary/compiler/types";
 
 const tempDirs: string[] = [];
 

@@ -1,4 +1,4 @@
-import { RangeStrataQueryService } from "../query/query-service";
+import { RangeStrataQueryService } from "../query/service";
 import { getBooleanArg, getNumberArg, getStringArg, parseCliArgs } from "../../cli/args";
 
 const args = parseCliArgs(Bun.argv.slice(2));

@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { Database } from "bun:sqlite";
-import { buildRangeStrataBinaryStore } from "../src/range-strata-binary/importer/build-binary-store";
-import { runStandaloneVerify } from "../src/range-strata-binary/verify/standalone";
+import { buildRangeStrataBinaryStore } from "../src/range-strata-binary/compiler/pipeline";
+import { runStandaloneVerify } from "../src/range-strata-binary/integrity/self-check";
 const tempDirs: string[] = [];
 
 afterEach(async () => {
@@ -78,11 +78,11 @@ describe("Range Strata Binary standalone verify", () => {
     const report = await runStandaloneVerify({ dir: outDir, verifyChecksums: false });
 
     expect(report.totals.manifestOk).toBe(true);
-    expect(report.totals.metaDbOk).toBe(true);
-    expect(report.totals.idxFilesOk).toBeGreaterThan(0);
-    expect(report.totals.idxFilesFailed).toBe(0);
-    expect(report.totals.binFilesOk).toBeGreaterThan(0);
-    expect(report.totals.binFilesFailed).toBe(0);
+    expect(report.totals.catalogOk).toBe(true);
+    expect(report.totals.indexFilesOk).toBeGreaterThan(0);
+    expect(report.totals.indexFilesFailed).toBe(0);
+    expect(report.totals.packFilesOk).toBeGreaterThan(0);
+    expect(report.totals.packFilesFailed).toBe(0);
     expect(report.failures.length).toBe(0);
   });
 
@@ -91,7 +91,7 @@ describe("Range Strata Binary standalone verify", () => {
     const report = await runStandaloneVerify({ dir: outDir, verifyChecksums: true });
 
     expect(report.totals.manifestOk).toBe(true);
-    expect(report.totals.metaDbOk).toBe(true);
+    expect(report.totals.catalogOk).toBe(true);
     expect(report.failures.length).toBe(0);
   });
 
@@ -148,7 +148,7 @@ describe("Range Strata Binary standalone verify", () => {
     writeFileSync(idxPath, raw);
 
     const report = await runStandaloneVerify({ dir: outDir, verifyChecksums: false });
-    expect(report.totals.idxFilesFailed).toBeGreaterThan(0);
+    expect(report.totals.indexFilesFailed).toBeGreaterThan(0);
     expect(report.failures.some((f) => f.reason === "INVALID_MAGIC")).toBe(true);
   });
 
@@ -161,8 +161,8 @@ describe("Range Strata Binary standalone verify", () => {
     writeFileSync(binPath, raw);
 
     const report = await runStandaloneVerify({ dir: outDir, verifyChecksums: false });
-    expect(report.totals.binFilesFailed).toBeGreaterThan(0);
-    expect(report.failures.some((f) => f.reason === "INVALID_HEADER" && f.layer === "bin-structure")).toBe(true);
+    expect(report.totals.packFilesFailed).toBeGreaterThan(0);
+    expect(report.failures.some((f) => f.reason === "INVALID_HEADER" && f.layer === "pack-header")).toBe(true);
   });
 
   test("fails when meta.db action_schema checksum is wrong", async () => {
@@ -185,10 +185,10 @@ describe("Range Strata Binary standalone verify", () => {
     }
 
     const report = await runStandaloneVerify({ dir: outDir, verifyChecksums: false });
-    expect(report.failures.some((f) => f.reason === "CHECKSUM_MISMATCH" && f.layer === "meta-db")).toBe(true);
+    expect(report.failures.some((f) => f.reason === "CHECKSUM_MISMATCH" && f.layer === "catalog")).toBe(true);
   });
 
-  test("counts idx-bin cross-reference failures in totals", async () => {
+  test("counts index-pack cross-reference failures in totals", async () => {
     const { outDir } = await buildFixture();
     const idxPath = join(outDir, "ranges_default_6max_100BB.idx");
     const raw = readFileSync(idxPath);
@@ -198,8 +198,8 @@ describe("Range Strata Binary standalone verify", () => {
     writeFileSync(idxPath, raw);
 
     const report = await runStandaloneVerify({ dir: outDir, verifyChecksums: false });
-    expect(report.failures.some((f) => f.layer === "idx-bin-cross" && f.reason === "PACK_SIZE_MISMATCH")).toBe(true);
-    expect(report.totals.idxBinCrossFailures).toBeGreaterThan(0);
+    expect(report.failures.some((f) => f.layer === "index-pack-cross" && f.reason === "PACK_SIZE_MISMATCH")).toBe(true);
+    expect(report.totals.indexPackCrossFailures).toBeGreaterThan(0);
   });
 
   test("reports idx out-of-order as failure", async () => {
@@ -236,7 +236,7 @@ describe("Range Strata Binary standalone verify", () => {
     expect(jsonContent.totals.manifestOk).toBe(true);
 
     const mdContent = readFileSync(mdPath, "utf-8");
-    expect(mdContent).toContain("Range Strata Binary Verify Report");
+    expect(mdContent).toContain("Range Strata Binary Integrity Report");
     expect(mdContent).toContain("All checks passed");
   });
 });
@@ -245,7 +245,7 @@ describe("Range Strata Binary cross verify", () => {
   test("cross mode sampling passes on clean build", async () => {
     const { outDir, sourcePath } = await buildFixture();
 
-    const { runCrossVerify } = await import("../src/range-strata-binary/verify/cross");
+    const { runCrossVerify } = await import("../src/range-strata-binary/integrity/cross-check");
     const outPath = join(outDir, "cross-report.json");
 
     const report = await runCrossVerify({
@@ -258,7 +258,7 @@ describe("Range Strata Binary cross verify", () => {
     });
 
     expect(report.totals.manifestOk).toBe(true);
-    expect(report.totals.metaDbOk).toBe(true);
+    expect(report.totals.catalogOk).toBe(true);
     // Cross-check should have no failures
     expect((report.totals.failedSourceRecords ?? 0)).toBe(0);
     expect((report.totals.extraBinaryRecords ?? 0)).toBe(0);
@@ -283,7 +283,7 @@ describe("Range Strata Binary cross verify", () => {
       db.close();
     }
 
-    const { runCrossVerify } = await import("../src/range-strata-binary/verify/cross");
+    const { runCrossVerify } = await import("../src/range-strata-binary/integrity/cross-check");
     const report = await runCrossVerify({
       dir: outDir,
       sourceDbPath: sourcePath,

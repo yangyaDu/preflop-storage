@@ -11,9 +11,9 @@ import {
   IDX_MAGIC,
   IDX_HEADER_SIZE,
   IDX_RECORD_SIZE,
-} from "../src/range-strata-binary/idx/idx-types";
-import { RangeIdxWriter } from "../src/range-strata-binary/idx/idx-writer";
-import { RangeIdxReader } from "../src/range-strata-binary/idx/idx-reader";
+} from "../src/range-strata-binary/index/types";
+import { RangeIdxWriter } from "../src/range-strata-binary/index/writer";
+import { RangeIdxReader } from "../src/range-strata-binary/index/reader";
 
 const TEST_DIR = join(import.meta.dirname, "temp-test-idx");
 

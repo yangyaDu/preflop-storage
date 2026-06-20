@@ -1,6 +1,6 @@
-import { runStandaloneVerify } from "./standalone";
+import { runStandaloneVerify } from "./self-check";
 import { runSourceCross } from "./checks/source-cross";
-import type { BuildManifest } from "../importer/build-types";
+import type { BuildManifest } from "../compiler/types";
 import { createReport, writeJsonReport, writeMdReport, type RangeStrataVerifyReport, type VerifyFailure } from "./report";
 
 export interface CrossVerifyOptions {
@@ -25,7 +25,7 @@ export async function runCrossVerify(options: CrossVerifyOptions): Promise<Range
 
   // Check if standalone found fatal issues
   const hasFileIssues = standaloneReport.failures.some(
-    (f) => f.layer === "manifest" || f.layer === "meta-db" || f.reason === "MISSING_FILE",
+    (f) => f.layer === "manifest" || f.layer === "catalog" || f.reason === "MISSING_FILE",
   );
 
   if (hasFileIssues) {

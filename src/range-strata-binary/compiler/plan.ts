@@ -3,8 +3,8 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { getBinFileName, type RangeDimension } from "../../db/naming";
 import { PreflopStoreError } from "../../query/errors";
-import { getIdxFileName } from "../db/naming";
-import type { BuildManifest, DimensionBuildStats } from "./build-types";
+import { getIdxFileName } from "../catalog/naming";
+import type { BuildManifest, DimensionBuildStats } from "./types";
 
 interface ResolveBuildPlanOptions {
   rangeStrataStoreDir: string;

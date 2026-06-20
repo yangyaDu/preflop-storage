@@ -2,7 +2,7 @@
 
 最后更新：2026-06-20
 
-这份文档只记录当前已经落地的能力、最近完成的变更，以及下一步还需要继续补强的点。历史方案推演和早期计划已经不再作为主线，当前默认推荐使用 **Scheme2 + Rust**。
+这份文档只记录当前已经落地的能力、最近完成的变更，以及下一步还需要继续补强的点。历史方案推演和早期计划已经不再作为主线，当前默认推荐使用 **Range Strata Binary + Rust**。
 
 ## 当前结论
 
@@ -27,19 +27,19 @@
 | --- | --- | --- |
 | 数据格式设计 | 已完成 | `PFSP` 二进制格式、`.idx` 索引格式、action schema 编解码已稳定 |
 | Scheme1 构建/查询 | 已完成 | 保留作兼容与对照路径 |
-| Scheme2 构建/查询 | 已完成 | 当前主线路径，查询热路径走 Rust |
+| Range Strata Binary 构建/查询 | 已完成 | 当前主线路径，查询热路径走 Rust |
 | Rust 原生插件 | 已完成 | `DimensionHandle` 已接管 `.idx + .bin` 热路径，V1 native 构建脚本已落地 |
 | 构建续跑与 manifest | 已完成 | 支持 `--resume`、失败维度重建、旧产物清理 |
 | 构建统计报告 | 已完成 | `--stats` / `--stats-md` 可输出 JSON 和 Markdown |
 | 分析报告 | 已完成 | SQLite 分析、存储分析、benchmark 报告已落盘到 `reports/` |
 | 查询 SDK 文档 | 已完成 | 见 `docs/query-sdk.md` |
 | 部署/回滚文档 | 已完成 | 见 `docs/deploy-and-rollback.md` |
-| 自动化全量校验（Scheme2 专用） | 已完成 | `verify` 支持 standalone 自检 + cross 交叉校验 |
+| 自动化全量校验（Range Strata Binary 专用） | 已完成 | `verify` 支持 standalone 自检 + cross 交叉校验 |
 | OS 冷启动 Benchmark | 已完成 V2 | `benchmark:cold` 默认覆盖 manifest 中全部成功维度，生产产物应覆盖 9 个维度。V2 新增：失败隔离、phase accounting、`--query-policy`、`--fail-fast`、父进程 RSS、非零 filler |
 
 ## 最近完成的变更
 
-### 1. Scheme2 全量校验命令（新增）
+### 1. Range Strata Binary 全量校验命令（新增）
 
 新增 `bun run verify` 命令，提供两条校验链路：
 
@@ -47,22 +47,22 @@
 - **cross 模式**：叠加 source DB（`range.db`）交叉校验，对每条记录的 frequency/handEV 做逐行对比（采样 + 全量），复用了 Scheme1 的容差策略。
 
 相关代码：
-- `src/scheme2/cli/verify-binary.ts` — CLI 入口
-- `src/scheme2/verify/checks/manifest.ts` — manifest.json 自检
-- `src/scheme2/verify/checks/meta-db.ts` — meta.db 自检（action_schema checksum、schema_key）
-- `src/scheme2/verify/checks/idx-structure.ts` — .idx 魔数、版本、记录排序
-- `src/scheme2/verify/checks/bin-structure.ts` — .bin 魔数、版本
-- `src/scheme2/verify/checks/idx-bin-cross.ts` — .idx ↔ .bin 交叉引用 + CRC32C + pack 结构
-- `src/scheme2/verify/checks/source-cross.ts` — source DB 交叉数据校验
-- `src/scheme2/verify/report.ts` — JSON/Markdown 报告生成
-- `tests/scheme2-verify.test.ts` — 12 个测试用例
+- `src/range-strata-binary/cli/verify.ts` — CLI 入口
+- `src/range-strata-binary/integrity/checks/manifest.ts` — manifest.json 自检
+- `src/range-strata-binary/integrity/checks/catalog.ts` — meta.db 自检（action_schema checksum、schema_key）
+- `src/range-strata-binary/integrity/checks/index-header.ts` — .idx 魔数、版本、记录排序
+- `src/range-strata-binary/integrity/checks/pack-header.ts` — .bin 魔数、版本
+- `src/range-strata-binary/integrity/checks/index-pack-cross.ts` — .idx ↔ .bin 交叉引用 + CRC32C + pack 结构
+- `src/range-strata-binary/integrity/checks/source-cross.ts` — source DB 交叉数据校验
+- `src/range-strata-binary/integrity/report.ts` — JSON/Markdown 报告生成
+- `tests/range-strata-verify.test.ts` — 12 个测试用例
 
-验证结果（针对 range-db/binary-scheme2，9 维度，521K packs）：
+验证结果（针对 range-db/range-strata-binary，9 维度，521K packs）：
 - standalone：全部通过
 - standalone + CRC：521K packs CRC32C 校验全部通过
 - cross（采样 500 条）：0 失败
 
-`src/scheme2/importer/build-binary-store.ts` 现在已经补上下面几件事：
+`src/range-strata-binary/compiler/pipeline.ts` 现在已经补上下面几件事：
 
 - `manifest.json` 记录每个维度的状态：`success` / `failed`
 - `--resume` 只跳过真正构建成功且产物完整的维度
@@ -73,7 +73,7 @@
 
 这次修复的重点是避免“上次失败的维度在 resume 时被误判为已完成”，以及避免“旧成功维度被复用到新 source DB”。
 
-### 2. Scheme2 构建测试补齐
+### 2. Range Strata Binary 构建测试补齐
 
 新增并通过了以下关键测试：
 
@@ -82,7 +82,7 @@
 - `overwrite removes files listed by the previous manifest`
 - `writes JSON and Markdown build stats`
 
-这部分测试位于 `tests/scheme2-build.test.ts`。
+这部分测试位于 `tests/range-strata-compile.test.ts`。
 
 ### 3. Native addon 构建流水线 V1
 
@@ -106,7 +106,7 @@ V1 目标是固化本机构建流程；GitHub Actions 多平台矩阵、npm preb
 
 ### 4. Benchmark 输出校验测试
 
-新增 `tests/benchmark-output.test.ts`，用最小 SQLite fixture 构建 Scheme2 产物后，以子进程运行 `src/scheme2/cli/benchmark-binary.ts`：
+新增 `tests/benchmark-output.test.ts`，用最小 SQLite fixture 构建 Range Strata Binary 产物后，以子进程运行 `src/range-strata-binary/cli/benchmark.ts`：
 
 - 成功路径校验 JSON / Markdown 均写出，核心字段完整，包含 `hand-strategy`、`batch-hand-strategy`、`batch-size-*` case。
 - `--verify-results` 路径校验报告 notes 包含结果抽样核对信息，且 mismatch 为 0。
@@ -119,7 +119,7 @@ V1 目标是固化本机构建流程；GitHub Actions 多平台矩阵、npm preb
 已将 Float32 精度校验从固定绝对容差升级为 bit-exact 策略：
 
 - 新增 `src/precision/float32.ts`，提供 `Math.fround(source)` 对齐、Float32 bit pattern 比较、nullable EV 语义校验和量化误差统计。
-- Scheme2 cross verify 现在要求 decoded value 与 source 正确舍入后的 Float32 值完全一致。
+- Range Strata Binary cross verify 现在要求 decoded value 与 source 正确舍入后的 Float32 值完全一致。
 - Cross verify 报告新增 `precision` 段，统计 `checkedValues`、`bitExactValues`、`mismatchValues`、最大量化误差、最大实现误差、P95/P99 量化误差和最大误差样本。
 - 旧 `1e-6 / 1e-5` 固定容差降级为历史观测参考，不再作为核心正确性标准。
 - 新增测试覆盖：普通小数、相邻 Float32 边界、signed zero、nullable handEV、量化误差统计，以及 source 值在旧容差内变化但落到不同 Float32 时 cross verify 必须失败。
@@ -133,11 +133,11 @@ Float32 bits(decoded) === Float32 bits(source)
 
 ### 6. OS 冷启动 Benchmark V1
 
-新增 `bun run benchmark:cold`，用于把 Scheme2 冷启动开销从常规热路径 benchmark 中单独拆出来。
+新增 `bun run benchmark:cold`，用于把 Range Strata Binary 冷启动开销从常规热路径 benchmark 中单独拆出来。
 
 默认行为：
 
-- 从 `range-db/binary-scheme2/manifest.json` 读取全部 `success` 维度。
+- 从 `range-db/range-strata-binary/manifest.json` 读取全部 `success` 维度。
 - 不传 `--dimension` 时全量覆盖这些维度；当前生产产物应覆盖 `default` 的 `6max/8max/9max` × `100BB/200BB/300BB` 共 9 个维度。
 - 每个维度启动独立 Bun worker 进程，记录 `open meta.db + open idx/bin + first hand query` 的耗时。
 - 支持 `--runs` / `--runs-per-dimension`，例如 9 维度 × 10 runs = 90 次 fresh process 测量。
@@ -149,7 +149,7 @@ Float32 bits(decoded) === Float32 bits(source)
 ```powershell
 bun run benchmark:cold `
   --source range-db/range.db `
-  --dir range-db/binary-scheme2 `
+  --dir range-db/range-strata-binary `
   --runs 10 `
   --concrete-line-id 1 `
   --hand AA `
@@ -185,7 +185,7 @@ Parent process overhead p50 / p95：122.26 ms / 150.82 ms
 
 V2 修复了 grilling review 发现的 6 个设计缺陷：
 
-1. **`openAndFirstQueryMs` → `storeOpenAndFirstQueryMs` 重命名**：明确该字段 = Scheme2 store open + dimension prewarm + first query，不含 Bun 运行时/模块加载时间。端到端冷启动应看 `processElapsedMs` 或 `workerTotalMs`。
+1. **`openAndFirstQueryMs` → `storeOpenAndFirstQueryMs` 重命名**：明确该字段 = Range Strata Binary store open + dimension prewarm + first query，不含 Bun 运行时/模块加载时间。端到端冷启动应看 `processElapsedMs` 或 `workerTotalMs`。
 2. **失败 run 隔离**：失败 run 的全零 timing 不再污染 latency 聚合（仅 `r.ok` 参与）。每个维度新增 `successCount`、`failures[]` 字段。新增 `--max-errors-per-dimension` 和 `--fail-fast` 韧性控制。
 3. **`os-best-effort` filler 改为非零确定性模式**：避免 OS zero-page dedup。语义降级为「cache perturbation」而非「cache eviction」。报告输出 filler/dataset 比例。
 4. **Phase accounting 校验**：每个 run 计算 `phaseSumMs - workerTotalMs`，输出 `unaccountedMs` 和 `unaccountedRatio`，并在报告中记录最差情况。
@@ -231,10 +231,10 @@ V2 修复了 grilling review 发现的 6 个设计缺陷：
 
 ### 构建产物
 
-完整的 Scheme2 输出目录包含：
+完整的 Range Strata Binary 输出目录包含：
 
 ```text
-binary-scheme2/
+range-strata-binary/
   manifest.json
   meta.db
   ranges_{strategy}_{N}max_{BB}BB.idx
@@ -259,7 +259,7 @@ binary-scheme2/
 - 按 action 过滤手牌
 - 同步热路径查询（预热后）
 
-主入口是 `src/scheme2/query/query-service.ts`。
+主入口是 `src/range-strata-binary/query/service.ts`。
 
 ## 现有报告摘要
 
@@ -275,11 +275,11 @@ binary-scheme2/
 
 ### 查询性能
 
-基于 `reports/benchmark-scheme2.md` 与 `reports/benchmark-sqlite.md`：
+基于 `reports/benchmark-range-strata-binary.md` 与 `reports/benchmark-sqlite.md`：
 
-- 单手牌查询 p50：SQLite `0.038 ms`，Scheme2 `0.009 ms`
-- batch-20 查询 p50：SQLite `0.683 ms`，Scheme2 `0.096 ms`
-- 综合 QPS：SQLite `1401`，Scheme2 `8701`
+- 单手牌查询 p50：SQLite `0.038 ms`，Range Strata Binary `0.009 ms`
+- batch-20 查询 p50：SQLite `0.683 ms`，Range Strata Binary `0.096 ms`
+- 综合 QPS：SQLite `1401`，Range Strata Binary `8701`
 
 当前主要 tradeoff：
 
@@ -303,9 +303,9 @@ binary-scheme2/
 
 ### 3. 文档进一步收束
 
-大部分主线文档已经切到 Scheme2 + Rust，但部分历史测试说明仍带有旧路径。后续可以继续把文档口径统一到以下主线：
+大部分主线文档已经切到 Range Strata Binary + Rust，但部分历史测试说明仍带有旧路径。后续可以继续把文档口径统一到以下主线：
 
-- 当前推荐方案是 Scheme2 + Rust
+- 当前推荐方案是 Range Strata Binary + Rust
 - Scheme1 只保留给兼容、回归和对比测试
 - benchmark 聚合脚本与 README 需要持续保持同一口径
 
@@ -318,7 +318,7 @@ binary-scheme2/
 - benchmark 报告
 - OS 冷启动 benchmark
 - 测试覆盖
-- Scheme2 standalone / cross 校验
+- Range Strata Binary standalone / cross 校验
 - `check:release` 发布前检查脚本
 
 后续还建议补强：
@@ -338,17 +338,17 @@ bun run build:native
 # 3. 跑质量检查
 bun run check
 
-# 4. 构建 Scheme2 数据
-bun run build --source range-db/range.db --out range-db/binary-scheme2 --overwrite
+# 4. 构建 Range Strata Binary 数据
+bun run build --source range-db/range.db --out range-db/range-strata-binary --overwrite
 
-# 5. 发布前额外检查：Bun + Rust + Scheme2 standalone 自检
+# 5. 发布前额外检查：Bun + Rust + Range Strata Binary standalone 自检
 bun run check:release
 
 # 6. 9 维度 fresh process 冷启动 benchmark
-bun run benchmark:cold --source range-db/range.db --dir range-db/binary-scheme2 --runs 10 --concrete-line-id 1 --hand AA --mode process-cold
+bun run benchmark:cold --source range-db/range.db --dir range-db/range-strata-binary --runs 10 --concrete-line-id 1 --hand AA --mode process-cold
 
 # 7. 查询验证
-bun run query --dir range-db/binary-scheme2 --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand AA
+bun run query --dir range-db/range-strata-binary --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand AA
 ```
 
 ## 相关文档

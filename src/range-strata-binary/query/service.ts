@@ -18,8 +18,8 @@ import {
   getDrillScenarioTableName,
   quoteIdentifier,
 } from "../../db/naming";
-import { getIdxFileName } from "../db/naming";
-import { RangeIdxReader } from "../idx/idx-reader";
+import { getIdxFileName } from "../catalog/naming";
+import { RangeIdxReader } from "../index/reader";
 
 // Rust native addon — replaces RangeIdxReader + RangeBinReader for the hot path.
 import { DimensionHandle, type BatchQueryRequest, type PackDecodeResult } from "../../../native-addon/index.js";

@@ -82,7 +82,7 @@ try {
   timings.argsParseMs = performance.now() - argsParseStart;
 
   const queryServiceImportStart = performance.now();
-  const { RangeStrataQueryService } = await import("../query/query-service");
+  const { RangeStrataQueryService } = await import("../query/service");
   timings.queryServiceImportMs = performance.now() - queryServiceImportStart;
 
   const memoryStart = performance.now();

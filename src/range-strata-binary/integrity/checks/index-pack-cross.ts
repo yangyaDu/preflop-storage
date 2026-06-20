@@ -6,17 +6,17 @@ import {
   IDX_RECORD_SIZE,
   decodeIdxHeader,
   decodeIdxRecordAt,
-} from "../../idx/idx-types";
+} from "../../index/types";
 import { crc32c } from "../../../binary/crc32c";
-import type { BuildManifest } from "../../importer/build-types";
-import { dimensionKey } from "../../db/naming";
+import type { BuildManifest } from "../../compiler/types";
+import { dimensionKey } from "../../catalog/naming";
 import type { VerifyCheckResult, VerifyFailure } from "../report";
 
-export interface IdxBinCrossOptions {
+export interface IndexPackCrossOptions {
   verifyChecksums: boolean;
 }
 
-export function checkIdxBinCross(dir: string, manifest: BuildManifest, options: IdxBinCrossOptions): VerifyCheckResult {
+export function checkIndexPackCross(dir: string, manifest: BuildManifest, options: IndexPackCrossOptions): VerifyCheckResult {
   const failures: VerifyFailure[] = [];
 
   // Prepare action_schema cache from meta.db
@@ -37,10 +37,10 @@ export function checkIdxBinCross(dir: string, manifest: BuildManifest, options: 
     }
   } catch {
     failures.push({
-      layer: "idx-bin-cross",
-      check: "meta-db",
+      layer: "index-pack-cross",
+      check: "catalog",
       reason: "IO_ERROR",
-      message: "Cannot open meta.db for idx-bin cross reference checks",
+      message: "Cannot open meta.db for index-pack cross reference checks",
     });
     return { failures };
   } finally {
@@ -63,7 +63,7 @@ export function checkIdxBinCross(dir: string, manifest: BuildManifest, options: 
       binRaw = new Uint8Array(readFileSync(binPath).buffer);
     } catch {
       failures.push({
-        layer: "idx-bin-cross",
+        layer: "index-pack-cross",
         check: `dimension:${key}`,
         reason: "IO_ERROR",
         message: `Cannot read ${idxPath} or ${binPath}`,
@@ -71,7 +71,7 @@ export function checkIdxBinCross(dir: string, manifest: BuildManifest, options: 
       continue;
     }
 
-    if (idxRaw.byteLength < IDX_HEADER_SIZE) continue; // already reported by idx-structure
+    if (idxRaw.byteLength < IDX_HEADER_SIZE) continue; // already reported by index-header
 
     const header = decodeIdxHeader(idxRaw.subarray(0, IDX_HEADER_SIZE));
     const recordCount = header.recordCount;
@@ -86,7 +86,7 @@ export function checkIdxBinCross(dir: string, manifest: BuildManifest, options: 
       if (rec.offset < 16) {
         // Magic header occupies first 16 bytes
         failures.push({
-          layer: "idx-bin-cross",
+          layer: "index-pack-cross",
           check: `dimension:${key}`,
           reason: "INVALID_OFFSET",
           message: `.idx record concreteLineId=${rec.concreteLineId}: offset=${rec.offset} is within .bin header (0..15)`,
@@ -94,7 +94,7 @@ export function checkIdxBinCross(dir: string, manifest: BuildManifest, options: 
       }
       if (packEnd > binFileSize) {
         failures.push({
-          layer: "idx-bin-cross",
+          layer: "index-pack-cross",
           check: `dimension:${key}`,
           reason: "OUT_OF_BOUNDS",
           message: `.idx record concreteLineId=${rec.concreteLineId}: offset+byteLength=${packEnd} exceeds .bin file size ${binFileSize}`,
@@ -108,7 +108,7 @@ export function checkIdxBinCross(dir: string, manifest: BuildManifest, options: 
         const expectedPackLen = rec.handCount * (5 + schemaInfo.actionCount * 8);
         if (rec.byteLength !== expectedPackLen) {
           failures.push({
-            layer: "idx-bin-cross",
+            layer: "index-pack-cross",
             check: `dimension:${key}`,
             reason: "PACK_SIZE_MISMATCH",
             message: `.idx record concreteLineId=${rec.concreteLineId}: byteLength=${rec.byteLength} != handCount*(${5}+${schemaInfo.actionCount}*8)=${expectedPackLen}`,
@@ -126,7 +126,7 @@ export function checkIdxBinCross(dir: string, manifest: BuildManifest, options: 
           const actualCrc = crc32c(packData);
           if (actualCrc !== (rec.checksum >>> 0)) {
             failures.push({
-              layer: "idx-bin-cross",
+              layer: "index-pack-cross",
               check: `dimension:${key}`,
               reason: "CHECKSUM_MISMATCH",
               message: `.idx record concreteLineId=${rec.concreteLineId}: stored CRC ${rec.checksum >>> 0} != computed ${actualCrc}`,
@@ -141,7 +141,7 @@ export function checkIdxBinCross(dir: string, manifest: BuildManifest, options: 
             const handId = packData[h];
             if (handId > 168) {
               failures.push({
-                layer: "idx-bin-cross",
+                layer: "index-pack-cross",
                 check: `dimension:${key}`,
                 reason: "INVALID_HAND_ID",
                 message: `.idx record concreteLineId=${rec.concreteLineId}: handId=${handId} at index ${h} is out of range [0, 168]`,
@@ -149,7 +149,7 @@ export function checkIdxBinCross(dir: string, manifest: BuildManifest, options: 
             }
             if (handId <= prevHandId && h > 0) {
               failures.push({
-                layer: "idx-bin-cross",
+                layer: "index-pack-cross",
                 check: `dimension:${key}`,
                 reason: "HAND_ID_NOT_SORTED",
                 message: `.idx record concreteLineId=${rec.concreteLineId}: handIds not strictly increasing at index ${h} (${handId} <= ${prevHandId})`,

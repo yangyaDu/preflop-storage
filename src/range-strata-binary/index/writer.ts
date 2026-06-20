@@ -1,6 +1,6 @@
 import { mkdir, open, type FileHandle } from "node:fs/promises";
 import { dirname } from "node:path";
-import { encodeIdxHeader, encodeIdxRecord, IDX_HEADER_SIZE, type IdxRecord } from "./idx-types";
+import { encodeIdxHeader, encodeIdxRecord, IDX_HEADER_SIZE, type IdxRecord } from "./types";
 
 export class RangeIdxWriter {
   private constructor(

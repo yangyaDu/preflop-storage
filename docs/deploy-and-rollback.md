@@ -6,10 +6,10 @@
 
 ## 1. 部署文件清单
 
-一个完整的 Scheme2 数据部署包含以下文件：
+一个完整的 Range Strata Binary 数据部署包含以下文件：
 
 ```
-binary-scheme2/
+range-strata-binary/
 ├── manifest.json                  # 构建清单（版本、checksum、维度列表）
 ├── meta.db                        # SQLite 元数据库（concrete lines, action schemas, drill scenarios）
 ├── ranges_{strategy}_{N}max_{BB}BB.bin   # 每个维度的二进制策略数据
@@ -22,14 +22,14 @@ binary-scheme2/
 
 ```powershell
 # 全量构建
-bun run build --source range-db/new-range.db --out range-db/binary-scheme2-v2
+bun run build --source range-db/new-range.db --out range-db/range-strata-binary-v2
 
 # 构建并输出统计报告
 bun run build \
   --source range-db/new-range.db \
-  --out range-db/binary-scheme2-v2 \
-  --stats reports/build-scheme2-v2.json \
-  --stats-md reports/build-scheme2-v2.md
+  --out range-db/range-strata-binary-v2 \
+  --stats reports/build-range-strata-binary-v2.json \
+  --stats-md reports/build-range-strata-binary-v2.md
 ```
 
 ### 2.2 仅更新部分维度
@@ -38,7 +38,7 @@ bun run build \
 # 只重建 default:6max:100BB 维度
 bun run build \
   --source range-db/range.db \
-  --out range-db/binary-scheme2 \
+  --out range-db/range-strata-binary \
   --dimension default:6:100 \
   --overwrite
 ```
@@ -48,10 +48,10 @@ bun run build \
 ```powershell
 bun run build \
   --source range-db/range.db \
-  --out range-db/binary-scheme2 \
+  --out range-db/range-strata-binary \
   --resume \
-  --stats reports/build-scheme2.json \
-  --stats-md reports/build-scheme2.md
+  --stats reports/build-range-strata-binary.json \
+  --stats-md reports/build-range-strata-binary.md
 ```
 
 `--resume` 会读取已有的 `manifest.json`，跳过已完成的维度。中途失败的维度（`.tmp` 文件残留）也会被重新构建。续跑时会比对当前 source DB checksum 和 manifest 中记录的 checksum；如果源库已变化，需要使用 `--overwrite` 从头生成一个一致的新版本。
@@ -62,10 +62,10 @@ bun run build \
 # 1. 构建统计报告 — 确认无错误、压缩比合理
 bun run build \
   --source range-db/range.db \
-  --out range-db/binary-scheme2 \
+  --out range-db/range-strata-binary \
   --overwrite \
-  --stats reports/build-scheme2.json \
-  --stats-md reports/build-scheme2.md
+  --stats reports/build-range-strata-binary.json \
+  --stats-md reports/build-range-strata-binary.md
 
 # 2. 构建当前平台 native addon
 bun run build:native
@@ -74,13 +74,13 @@ bun run build:native
 bun run check:release
 
 # 4. Source DB 交叉校验（抽样；严格发布可把 --sample-size 设为 0 做全量）
-bun run verify --mode cross --source range-db/range.db --dir range-db/binary-scheme2 --sample-size 10000 --verify-checksum
+bun run verify --mode cross --source range-db/range.db --dir range-db/range-strata-binary --sample-size 10000 --verify-checksum
 
-# 5. Benchmark — 校验 Scheme2 查询链路可用并抽样比对结果
-bun run benchmark --dir range-db/binary-scheme2 --iterations 1000 --verify-results
+# 5. Benchmark — 校验 Range Strata Binary 查询链路可用并抽样比对结果
+bun run benchmark --dir range-db/range-strata-binary --iterations 1000 --verify-results
 
 # 6. Cold-start Benchmark — 默认覆盖 manifest 中全部成功维度，生产产物应为 9 个维度
-bun run benchmark:cold --source range-db/range.db --dir range-db/binary-scheme2 --runs 10 --concrete-line-id 1 --hand AA --mode process-cold
+bun run benchmark:cold --source range-db/range.db --dir range-db/range-strata-binary --runs 10 --concrete-line-id 1 --hand AA --mode process-cold
 ```
 
 V1 native addon 构建流程以 Windows 本机为优先支持环境：Windows x64 使用 `x86_64-pc-windows-msvc`，不要使用默认 GNU target。Linux x64 GNU 和 macOS arm64/x64 已保留脚本 target，实际发布前应在对应平台本机执行 `bun run build:native` 与 `bun run check:native`。
@@ -92,8 +92,8 @@ V1 native addon 构建流程以 Windows 本机为优先支持环境：Windows x6
 | Build 统计 | 0 errors，压缩比 ≤ 30% |
 | Native addon | 当前平台 `bun run build:native` 成功，`bun run check:native` 通过 |
 | 质量检查 | `bun run check:release` 全部通过 |
-| Scheme2 standalone 校验 | manifest/meta/idx/bin/CRC 全部通过 |
-| Scheme2 cross 校验 | source records failed = 0，extra binary records = 0 |
+| Range Strata Binary standalone 校验 | manifest/meta/idx/bin/CRC 全部通过 |
+| Range Strata Binary cross 校验 | source records failed = 0，extra binary records = 0 |
 | Benchmark | p50 查询时间 ≤ 0.012ms，QPS ≥ 80K |
 | 结果抽样核对 | `benchmark --verify-results` 无 mismatch |
 | Cold-start Benchmark | `benchmark:cold` 维度数 = 9，errorCount = 0，记录 p50/p95 作为发布基线 |
@@ -108,16 +108,16 @@ V1 native addon 构建流程以 Windows 本机为优先支持环境：Windows x6
 
 ```
 range-db/
-├── binary-scheme2-v1/     # 当前生产版本
-├── binary-scheme2-v2/     # 新版本（验证通过后切换）
-└── binary-scheme2/        # 软链接 → v1（应用程序指向此路径）
+├── range-strata-binary-v1/     # 当前生产版本
+├── range-strata-binary-v2/     # 新版本（验证通过后切换）
+└── range-strata-binary/        # 软链接 → v1（应用程序指向此路径）
 ```
 
 回滚步骤：
 ```powershell
 # 1. 切换软链接（应用程序立即生效）
-rm range-db/binary-scheme2
-ln -s range-db/binary-scheme2-v1 range-db/binary-scheme2
+rm range-db/range-strata-binary
+ln -s range-db/range-strata-binary-v1 range-db/range-strata-binary
 
 # 2. 如果有运行中的服务，重启
 # systemctl restart preflop-storage
@@ -129,7 +129,7 @@ ln -s range-db/binary-scheme2-v1 range-db/binary-scheme2
 
 ```powershell
 # 从备份恢复（提前备份是必须的）
-cp -r range-db/binary-scheme2-backup/* range-db/binary-scheme2/
+cp -r range-db/range-strata-binary-backup/* range-db/range-strata-binary/
 ```
 
 ### 4.3 通过 manifest.json 检查当前版本
@@ -163,9 +163,9 @@ cp -r range-db/binary-scheme2-backup/* range-db/binary-scheme2/
 
 ```powershell
 # 对当前部署目录执行可用性检查与抽样结果核对
-bun run verify --mode standalone --dir range-db/binary-scheme2 --verify-checksum
-bun run verify --mode cross --source range-db/range.db --dir range-db/binary-scheme2 --sample-size 10000 --verify-checksum
-bun run benchmark --dir range-db/binary-scheme2 --verify-results
+bun run verify --mode standalone --dir range-db/range-strata-binary --verify-checksum
+bun run verify --mode cross --source range-db/range.db --dir range-db/range-strata-binary --sample-size 10000 --verify-checksum
+bun run benchmark --dir range-db/range-strata-binary --verify-results
 ```
 
 ### 5.3 损坏恢复
@@ -193,10 +193,10 @@ bun run benchmark --dir range-db/binary-scheme2 --verify-results
 
 ```powershell
 # 重新构建失败或新增的维度
-bun run build --out range-db/binary-scheme2 --resume
+bun run build --out range-db/range-strata-binary --resume
 
 # 从零重建整个数据集
-bun run build --out range-db/binary-scheme2 --overwrite
+bun run build --out range-db/range-strata-binary --overwrite
 ```
 
 ## 7. 构建统计报告
@@ -208,7 +208,7 @@ bun run build --out range-db/binary-scheme2 --overwrite
   "generatedAt": "2026-06-17T10:30:00.000Z",
   "sourceDbPath": "range-db/range.db",
   "sourceDbSizeBytes": 1516838912,
-  "outDir": "range-db/binary-scheme2",
+  "outDir": "range-db/range-strata-binary",
   "outputTotalSizeBytes": 360710144,
   "outputMetaDbSizeBytes": 2097152,
   "compressionRatio": 0.2378,
@@ -242,9 +242,9 @@ bun run build --out range-db/binary-scheme2 --overwrite
 ```powershell
 bun run build \
   --source range-db/range.db \
-  --out range-db/binary-scheme2 \
+  --out range-db/range-strata-binary \
   --overwrite \
-  --stats-md reports/build-scheme2.md
+  --stats-md reports/build-range-strata-binary.md
 ```
 
 ## 8. 相关文档

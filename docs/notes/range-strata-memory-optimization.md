@@ -56,7 +56,7 @@
 | 8max 100/200/300 | 2.8–4.5 MB | mmap |
 | 9max 100/200/300 | 61–104 MB | file reader |
 
-**修改文件**：`src/scheme2/query/query-service.ts`
+**修改文件**：`src/range-strata-binary/query/service.ts`
 - `getBinReader()` 中先获取文件大小，按阈值选择 reader
 - `binReaders` Map 类型改为 `BinReader` 联合类型
 
@@ -65,12 +65,12 @@
 **问题**：`concrete_lines_*` 表 495K 行（77.6 MB），方案二查询服务从不读取。
 
 **修改**：
-- `src/scheme2/importer/build-binary-store.ts`：移除 `copyConcreteLines()` 函数、`insertConcreteLineByDimension` statements、相关 import
+- `src/range-strata-binary/compiler/pipeline.ts`：移除 `copyConcreteLines()` 函数、`insertConcreteLineByDimension` statements、相关 import
 - 重建后 meta.db 从 74 MB → ~300 KB
 
 ### P3：并行维度预热
 
-**修改**：`src/scheme2/benchmark/runner.ts` warmup 循环从 `for...of` + `await` 串行改为 `Promise.all` 并行。
+**修改**：`src/range-strata-binary/benchmark/runner.ts` warmup 循环从 `for...of` + `await` 串行改为 `Promise.all` 并行。
 
 ---
 
@@ -152,13 +152,13 @@ SQLite 的延迟优势来自：
 | 文件 | 操作 | 说明 |
 |---|---|---|
 | `src/binary/range-bin-file-reader.ts` | 新建 | 按需 fs.readSync 读取器 |
-| `src/scheme2/query/query-service.ts` | 修改 | 按文件大小选择 reader 类型 |
-| `src/scheme2/importer/build-binary-store.ts` | 修改 | 移除 concrete_lines 复制逻辑 |
-| `src/scheme2/benchmark/runner.ts` | 修改 | 并行预热 |
+| `src/range-strata-binary/query/service.ts` | 修改 | 按文件大小选择 reader 类型 |
+| `src/range-strata-binary/compiler/pipeline.ts` | 修改 | 移除 concrete_lines 复制逻辑 |
+| `src/range-strata-binary/benchmark/runner.ts` | 修改 | 并行预热 |
 
 ## 7. 不变项
 
 - `src/binary/range-bin-mmap-reader.ts` — 保留，小文件继续使用
-- `src/scheme2/idx/` — .idx 文件小，全量 mmap 合理
+- `src/range-strata-binary/index/` — .idx 文件小，全量 mmap 合理
 - `src/binary/range-pack-codec.ts` — 解码器不变
 - `src/benchmark/common.ts` — 测量框架不变

@@ -6,7 +6,7 @@
 
 ## 1. 目标
 
-Scheme2 查询热路径依赖 Rust `napi-rs` native addon。V1 的目标是把本机 native addon 构建流程固化，避免不同平台靠人工记忆 target。
+Range Strata Binary 查询热路径依赖 Rust `napi-rs` native addon。V1 的目标是把本机 native addon 构建流程固化，避免不同平台靠人工记忆 target。
 
 V1 优先保证：
 
@@ -60,7 +60,7 @@ bun run check:native
 bun run check:release
 ```
 
-`check:release` 会执行 TypeScript 检查、ESLint、Bun 测试、Rust formatter 检查、Rust 测试和 Scheme2 standalone CRC 自检。
+`check:release` 会执行 TypeScript 检查、ESLint、Bun 测试、Rust formatter 检查、Rust 测试和 Range Strata Binary standalone CRC 自检。
 
 ## 4. 构建脚本行为
 
