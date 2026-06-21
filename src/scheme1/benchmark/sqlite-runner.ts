@@ -11,6 +11,10 @@ interface QueryLike {
   all: (...params: unknown[]) => unknown[];
 }
 
+/**
+ * @deprecated SQLite benchmark runner is retained only as a legacy baseline.
+ * Use Range Strata Binary benchmark runners for new benchmark work.
+ */
 export class SqliteBenchmarkRunner {
   private readonly db: Database;
   private readonly handStatements = new Map<string, QueryLike>();
@@ -57,6 +61,10 @@ export class SqliteBenchmarkRunner {
 
 }
 
+/**
+ * @deprecated SQLite cold-start benchmark is retained only as a legacy baseline.
+ * Use Range Strata Binary cold-start benchmark for new benchmark work.
+ */
 export function measureSqliteColdStart(sourceDbPath: string, item: HandBenchmarkItem | undefined): ColdStartResult | null {
   if (!item) return null;
 

@@ -1,3 +1,7 @@
+/**
+ * @deprecated Scheme1 verification is retained only for legacy compatibility.
+ * Use src/range-strata-binary/cli/verify.ts for new verification work.
+ */
 import { Database } from "bun:sqlite";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";

@@ -1,3 +1,7 @@
+/**
+ * @deprecated Scheme1 is retained only for legacy compatibility and SQLite baseline comparison.
+ * Use src/range-strata-binary/cli/benchmark.ts for new binary benchmark work.
+ */
 import { join } from "node:path";
 import { BinaryBenchmarkRunner, measureBinaryColdStart } from "../benchmark/binary-runner";
 import {

@@ -18,6 +18,10 @@ import { encodeConcreteLinePack, toHex } from "../../importer/encode-pack";
 import { filterDimensions } from "../../utils/dimension";
 import { PreflopStoreError } from "../../query/errors";
 
+/**
+ * @deprecated Scheme1 build output is retained only for legacy compatibility and comparison.
+ * Use buildRangeStrataBinaryStore from src/range-strata-binary/compiler/pipeline for new builds.
+ */
 export interface BuildBinaryStoreOptions {
   sourceDbPath: string;
   outDir: string;
@@ -36,6 +40,10 @@ interface BuildStatements {
   insertRangePackIndexByDimension: Map<string, ReturnType<Database["prepare"]>>;
 }
 
+/**
+ * @deprecated Scheme1 build output is retained only for legacy compatibility and comparison.
+ * Use buildRangeStrataBinaryStore from src/range-strata-binary/compiler/pipeline for new builds.
+ */
 export async function buildBinaryStore(options: BuildBinaryStoreOptions): Promise<void> {
   await mkdir(options.outDir, { recursive: true });
 

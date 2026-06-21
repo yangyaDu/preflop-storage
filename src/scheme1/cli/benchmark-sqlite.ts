@@ -1,3 +1,7 @@
+/**
+ * @deprecated The SQLite benchmark is retained only as a legacy baseline comparison.
+ * Use src/range-strata-binary/cli/benchmark.ts for new benchmark work.
+ */
 import {
   buildTotals,
   createBenchmarkWorkload,

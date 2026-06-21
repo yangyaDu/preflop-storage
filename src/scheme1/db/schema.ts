@@ -7,6 +7,10 @@ import {
   type RangeDimension,
 } from "../../db/naming";
 
+/**
+ * @deprecated Scheme1 metadata schema is retained only for legacy compatibility.
+ * Use the Range Strata Binary compiler for new builds.
+ */
 export function initBinaryMetaDb(
   db: Database,
   dimensions: Pick<RangeDimension, "strategy" | "playerCount" | "depthBb">[],

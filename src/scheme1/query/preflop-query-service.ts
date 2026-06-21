@@ -7,6 +7,10 @@ import { MetaDb, type RangePackIndexRow } from "../db/meta-db";
 import { getHandCode, getHandId } from "../../hand/hand-dict";
 import { PreflopQueryError, toPreflopQueryErrorInfo, type PreflopQueryErrorInfo } from "../../query/errors";
 
+/**
+ * @deprecated Scheme1 query types are retained only for legacy compatibility.
+ * Use RangeStrataQueryService result types for new query work.
+ */
 export interface ActionResult {
   actionName: ActionName;
   actionSize: number;
@@ -16,27 +20,47 @@ export interface ActionResult {
   exists: boolean;
 }
 
+/**
+ * @deprecated Scheme1 query types are retained only for legacy compatibility.
+ * Use RangeStrataQueryService result types for new query work.
+ */
 export interface HandStrategy {
   holeCards: string;
   exists: boolean;
   actions: ActionResult[];
 }
 
+/**
+ * @deprecated Scheme1 query types are retained only for legacy compatibility.
+ * Use RangeStrataQueryService batch request types for new query work.
+ */
 export interface BatchHandStrategyRequest {
   concreteLineId: number;
   holeCards: string;
 }
 
+/**
+ * @deprecated Scheme1 query types are retained only for legacy compatibility.
+ * Use RangeStrataQueryService batch result types for new query work.
+ */
 export interface BatchHandStrategyResult extends BatchHandStrategyRequest {
   strategy: HandStrategy | null;
   error: PreflopQueryErrorInfo | null;
 }
 
+/**
+ * @deprecated Scheme1 service options are retained only for legacy compatibility.
+ * Use RangeStrataQueryServiceOptions for new query work.
+ */
 export interface PreflopQueryServiceOptions {
   verifyChecksums?: boolean;
   packCacheSize?: number;
 }
 
+/**
+ * @deprecated Scheme1 query service is retained only for legacy compatibility and comparison.
+ * Use RangeStrataQueryService from src/range-strata-binary/query/service for new query work.
+ */
 export class PreflopQueryService {
   public readonly metaDb: MetaDb;
   private readonly readers = new Map<string, RangeBinMmapReader>();

@@ -7,11 +7,19 @@ import {
   type HandBenchmarkItem,
 } from "../../benchmark/common";
 
+/**
+ * @deprecated Scheme1 binary benchmark is retained only for legacy comparison.
+ * Use Range Strata Binary benchmark runners for new benchmark work.
+ */
 export interface BinaryBenchmarkRunnerOptions {
   verifyChecksums: boolean;
   packCacheSize: number;
 }
 
+/**
+ * @deprecated Scheme1 binary benchmark is retained only for legacy comparison.
+ * Use Range Strata Binary benchmark runners for new benchmark work.
+ */
 export class BinaryBenchmarkRunner {
   private readonly service: PreflopQueryService;
 
@@ -68,6 +76,10 @@ export class BinaryBenchmarkRunner {
   }
 }
 
+/**
+ * @deprecated Scheme1 binary cold-start benchmark is retained only for legacy comparison.
+ * Use Range Strata Binary cold-start benchmark for new benchmark work.
+ */
 export async function measureBinaryColdStart(params: {
   metaDbPath: string;
   binaryDir: string;

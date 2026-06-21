@@ -1,3 +1,7 @@
+/**
+ * @deprecated Scheme1 comparison output is retained for legacy baseline reporting.
+ * Use Range Strata Binary benchmark reports as the primary performance signal.
+ */
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { formatBytes, formatPercent, markdownTable, safeRatio } from "../../analysis/format";

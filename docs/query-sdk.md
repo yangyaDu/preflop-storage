@@ -109,9 +109,9 @@ service.close();
 
 ---
 
-## 旧方案：PreflopQueryService（方案一，SQLite 索引 + .bin）
+## 已废弃旧方案：PreflopQueryService（方案一，SQLite 索引 + .bin）
 
-热路径为纯 JS（SQLite 查索引 + fs 读 .bin + JS 解码），性能劣于 SQLite，已不推荐使用。保留仅用于兼容 `getHandsByAction` 接口。
+热路径为纯 JS（SQLite 查索引 + fs 读 .bin + JS 解码），性能劣于 SQLite，已不推荐使用。Scheme1 自 2026-06-21 起 deprecated，只保留给旧数据兼容、SQLite 基线对比和历史校验；新业务应使用 `RangeStrataQueryService`。Scheme1 计划保留到 `0.2.x` 兼容窗口结束，目标在 `0.3.0` 移除。
 
 ### 初始化
 

@@ -1,3 +1,7 @@
+/**
+ * @deprecated Scheme1 is retained only for legacy compatibility and SQLite baseline comparison.
+ * Use Range Strata Binary analysis and verification paths for new work.
+ */
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, stat } from "node:fs/promises";
@@ -411,4 +415,3 @@ ${markdownTable(
 ${report.notes.map((note) => `- ${note}`).join("\n")}
 `;
 }
-

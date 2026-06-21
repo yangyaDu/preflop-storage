@@ -13,6 +13,10 @@ import {
 
 export type { ConcreteLineRow } from "../../db/meta-line-reader";
 
+/**
+ * @deprecated Scheme1 metadata schema is retained only for legacy compatibility.
+ * Use Range Strata Binary metadata/query APIs for new work.
+ */
 export interface RangePackIndexRow {
   player_count: number;
   depth_bb: number;
@@ -25,6 +29,10 @@ export interface RangePackIndexRow {
   bin_file: string;
 }
 
+/**
+ * @deprecated Scheme1 metadata schema is retained only for legacy compatibility.
+ * Use Range Strata Binary metadata/query APIs for new work.
+ */
 export interface ActionSchemaRow {
   id: number;
   action_count: number;
@@ -32,6 +40,10 @@ export interface ActionSchemaRow {
   checksum: number;
 }
 
+/**
+ * @deprecated Scheme1 metadata reader is retained only for legacy compatibility.
+ * Use RangeStrataQueryService for new query work.
+ */
 export class MetaDb {
   private readonly db: Database;
   private readonly indexCache = new Map<string, Map<number, RangePackIndexRow>>();

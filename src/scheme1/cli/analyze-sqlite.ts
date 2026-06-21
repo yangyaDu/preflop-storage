@@ -1,3 +1,7 @@
+/**
+ * @deprecated Scheme1 is retained only for legacy compatibility and SQLite baseline comparison.
+ * Use Range Strata Binary analysis and verification paths for new work.
+ */
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { mkdir, stat } from "node:fs/promises";

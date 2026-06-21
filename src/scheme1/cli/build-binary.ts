@@ -1,3 +1,7 @@
+/**
+ * @deprecated Scheme1 build output is retained only for legacy compatibility and comparison.
+ * Use src/range-strata-binary/cli/compile.ts for new builds.
+ */
 import { buildBinaryStore } from "../importer/build-binary-store";
 import { parseCliArgs, getBooleanArg, getNumberArg, getRepeatedStringArgs, getStringArg } from "../../cli/args";
 import { parseDimension } from "../../utils/dimension";

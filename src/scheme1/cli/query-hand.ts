@@ -1,3 +1,7 @@
+/**
+ * @deprecated Scheme1 query CLI is retained only for legacy compatibility.
+ * Use src/range-strata-binary/cli/query.ts for new query work.
+ */
 import { PreflopQueryService } from "../query/preflop-query-service";
 import { getBooleanArg, getNumberArg, getStringArg, parseCliArgs } from "../../cli/args";
 

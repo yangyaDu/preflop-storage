@@ -11,7 +11,7 @@ export * from "./importer/encode-pack";
 export * from "./importer/old-sqlite";
 export * from "./query/errors";
 
-// scheme1
+// Deprecated Scheme1 compatibility exports. Prefer Range Strata Binary exports below for new code.
 export * from "./scheme1/db/meta-db";
 export * from "./scheme1/importer/build-binary-store";
 export * from "./scheme1/query/preflop-query-service";
