@@ -81,17 +81,27 @@ export class RangeStrataQueryService {
     playerCount: number;
     depthBb: number;
   }): void {
-    const handle = this.handlePool.prewarm(params);
-    this.prewarmActionSchemasForDimension(handle);
+    this.handlePool.prewarm(params);
+    this.prewarmActionSchemasForDimension(params);
   }
 
   /**
-   * Scan the dimension's .idx records and prewarm only the action schemas
-   * actually referenced. Avoids eager full-schema loading while still keeping
-   * the query hot-path free of meta.db round-trips.
+   * Query the dimension_action_schemas table (populated at build time) and
+   * prewarm only the action schemas actually referenced by this dimension.
+   * Avoids .idx full-scan while still keeping the query hot-path free of
+   * meta.db round-trips.
    */
-  prewarmActionSchemasForDimension(handle: DimensionHandle): number {
-    return this.prewarmActionSchemas(handle.uniqueActionSchemaIds());
+  prewarmActionSchemasForDimension(
+    params: { strategy?: string; playerCount: number; depthBb: number },
+    _handle?: DimensionHandle,
+  ): number {
+    const strategy = params.strategy ?? "default";
+    const rows = this.metaDb
+      .query(
+        `SELECT action_schema_id FROM dimension_action_schemas WHERE strategy = ? AND player_count = ? AND depth_bb = ?`,
+      )
+      .all(strategy, params.playerCount, params.depthBb) as Array<{ action_schema_id: number }>;
+    return this.prewarmActionSchemas(rows.map((r) => r.action_schema_id));
   }
 
   /**
@@ -121,7 +131,7 @@ export class RangeStrataQueryService {
     // 冷路径：需要打开文件
     try {
       const newHandle = this.handlePool.prewarm(params);
-      this.prewarmActionSchemasForDimension(newHandle);
+      this.prewarmActionSchemasForDimension(params);
       return this.queryHandSync(params.holeCards, params.concreteLineId, newHandle);
     } catch (error) {
       throw toPreflopQueryError(error, "PACK_NOT_FOUND", {

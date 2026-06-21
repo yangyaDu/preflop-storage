@@ -34,6 +34,14 @@ export function initLightMetaDb(
       checksum INTEGER NOT NULL,
       schema_key TEXT NOT NULL UNIQUE
     );
+
+    CREATE TABLE IF NOT EXISTS dimension_action_schemas (
+      strategy TEXT NOT NULL,
+      player_count INTEGER NOT NULL,
+      depth_bb INTEGER NOT NULL,
+      action_schema_id INTEGER NOT NULL,
+      PRIMARY KEY (strategy, player_count, depth_bb, action_schema_id)
+    );
   `);
 
   // drill_scenario_lines is per-strategy — deduplicate before iterating

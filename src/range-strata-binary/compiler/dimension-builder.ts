@@ -98,6 +98,7 @@ async function buildDimension(params: {
   let srcRowCount = 0;
   let committed = false;
   const seenConcreteLineIds = new Set<number>();
+  const dimensionActionSchemaIds = new Set<number>();
 
   const flushCurrent = async (): Promise<boolean> => {
     if (currentConcreteLineId === null) return true;
@@ -110,6 +111,7 @@ async function buildDimension(params: {
       actionBlob: encoded.actionBlob,
       actionCount: encoded.actionCount,
     });
+    dimensionActionSchemaIds.add(actionSchemaId);
     const appended = await writer.append(encoded.payload);
 
     await idxWriter.append({
@@ -168,6 +170,14 @@ async function buildDimension(params: {
     }
     await flushCurrent();
     params.metaDb.exec("COMMIT");
+    const insertStmt = params.metaDb.prepare(`
+      INSERT OR IGNORE INTO dimension_action_schemas(strategy, player_count, depth_bb, action_schema_id)
+      VALUES (?, ?, ?, ?)
+    `);
+    for (const schemaId of dimensionActionSchemaIds) {
+      insertStmt.run(params.dimension.strategy, params.dimension.playerCount, params.dimension.depthBb, schemaId);
+    }
+    insertStmt.finalize();
     committed = true;
   } catch (error) {
     params.metaDb.exec("ROLLBACK");
