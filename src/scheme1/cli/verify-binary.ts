@@ -18,6 +18,7 @@ import { discoverRangeDimensions, type OldRangeRow } from "../../importer/old-sq
 import { getNumberArg, getRepeatedStringArgs, getStringArg, parseCliArgs } from "../../cli/args";
 import { filterDimensions, parseDimension, type DimensionSpec } from "../../utils/dimension";
 import { sum } from "../../utils/math";
+import { PreflopStoreError } from "../../query/errors";
 
 type VerifyMode = "sample" | "full";
 
@@ -444,7 +445,10 @@ async function readDecodedPackContext(params: {
 }): Promise<DecodedPackContext> {
   const index = getRangePackIndex(params.metaDb, params.dimension, params.concreteLineId);
   if (!index) {
-    throw new Error(`Missing range pack index for concrete_line_id=${params.concreteLineId}`);
+    throw new PreflopStoreError("INVALID_FORMAT", `Missing range pack index for concrete_line_id=${params.concreteLineId}`, {
+      dimension: dimensionKey(params.dimension),
+      concreteLineId: params.concreteLineId,
+    });
   }
 
   const actions = getActionSchema(params.metaDb, params.actionSchemaCache, index.action_schema_id);
@@ -491,7 +495,7 @@ function getActionSchema(db: Database, cache: Map<number, ActionDef[]>, actionSc
     .get(actionSchemaId) as { action_count: number; action_blob: Uint8Array } | null;
 
   if (!row) {
-    throw new Error(`Missing action schema: ${actionSchemaId}`);
+    throw new PreflopStoreError("INVALID_FORMAT", `Missing action schema: ${actionSchemaId}`, { actionSchemaId });
   }
 
   const actionBlob = new Uint8Array(row.action_blob.buffer, row.action_blob.byteOffset, row.action_blob.byteLength);
@@ -738,5 +742,7 @@ ${report.repairSuggestions.map((suggestion) => `- ${suggestion}`).join("\n")}
 
 function parseMode(value: string): VerifyMode {
   if (value === "sample" || value === "full") return value;
-  throw new Error(`Invalid --mode value: ${value}. Use sample or full.`);
+  throw new PreflopStoreError("INVALID_ARGUMENT", `Invalid --mode value: ${value}. Use sample or full.`, {
+    value,
+  });
 }

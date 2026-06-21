@@ -8,6 +8,7 @@ import {
   type BenchmarkRunReport,
 } from "../../benchmark/common";
 import { getStringArg, parseCliArgs } from "../../cli/args";
+import { PreflopStoreError } from "../../query/errors";
 
 interface CaseComparison {
   name: string;
@@ -63,10 +64,18 @@ function buildCompareReport(
   binaryReport: BenchmarkRunReport,
 ): BenchmarkCompareReport {
   if (sqliteReport.engine !== "sqlite") {
-    throw new Error(`Expected SQLite report at ${sqliteReportPath}, got ${sqliteReport.engine}`);
+    throw new PreflopStoreError("INVALID_FORMAT", `Expected SQLite report at ${sqliteReportPath}, got ${sqliteReport.engine}`, {
+      path: sqliteReportPath,
+      expected: "sqlite",
+      got: sqliteReport.engine,
+    });
   }
   if (binaryReport.engine !== "binary") {
-    throw new Error(`Expected binary report at ${binaryReportPath}, got ${binaryReport.engine}`);
+    throw new PreflopStoreError("INVALID_FORMAT", `Expected binary report at ${binaryReportPath}, got ${binaryReport.engine}`, {
+      path: binaryReportPath,
+      expected: "binary",
+      got: binaryReport.engine,
+    });
   }
 
   const caseNames = Array.from(new Set([...sqliteReport.cases, ...binaryReport.cases].map((item) => item.name))).sort();

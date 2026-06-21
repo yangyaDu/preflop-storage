@@ -16,6 +16,7 @@ import { initBinaryMetaDb } from "../db/schema";
 import { discoverRangeDimensions, type OldRangeRow } from "../../importer/old-sqlite";
 import { encodeConcreteLinePack, toHex } from "../../importer/encode-pack";
 import { filterDimensions } from "../../utils/dimension";
+import { PreflopStoreError } from "../../query/errors";
 
 export interface BuildBinaryStoreOptions {
   sourceDbPath: string;
@@ -41,7 +42,9 @@ export async function buildBinaryStore(options: BuildBinaryStoreOptions): Promis
   const metaPath = join(options.outDir, "meta.db");
   if (existsSync(metaPath)) {
     if (!options.overwrite) {
-      throw new Error(`Output meta DB already exists: ${metaPath}. Pass --overwrite to rebuild it.`);
+      throw new PreflopStoreError("BUILD_ERROR", `Output meta DB already exists: ${metaPath}. Pass --overwrite to rebuild it.`, {
+        metaPath,
+      });
     }
 
     await rm(metaPath, { force: true });
@@ -175,7 +178,9 @@ function copyDrillScenarioLines(params: {
       }>;
 
     const statement = params.statements.insertDrillLineByStrategy.get(strategy);
-    if (!statement) throw new Error(`Missing drill insert statement for strategy ${strategy}`);
+    if (!statement) {
+      throw new PreflopStoreError("BUILD_ERROR", `Missing drill insert statement for strategy ${strategy}`, { strategy });
+    }
 
     for (const row of rows) {
       statement.run(row.drill_name, row.abstract_line, row.player_count, row.depth);
@@ -190,7 +195,9 @@ function copyConcreteLines(params: {
 }): void {
   const key = dimensionKey(params.dimension);
   const statement = params.statements.insertConcreteLineByDimension.get(key);
-  if (!statement) throw new Error(`Missing concrete insert statement for dimension ${key}`);
+  if (!statement) {
+    throw new PreflopStoreError("BUILD_ERROR", `Missing concrete insert statement for dimension ${key}`, { dimension: key });
+  }
 
   const rows = params.sourceDb
     .query(`
@@ -237,7 +244,11 @@ async function buildDimension(params: {
 
     const key = dimensionKey(params.dimension);
     const statement = params.statements.insertRangePackIndexByDimension.get(key);
-    if (!statement) throw new Error(`Missing range pack insert statement for dimension ${key}`);
+    if (!statement) {
+      throw new PreflopStoreError("BUILD_ERROR", `Missing range pack insert statement for dimension ${key}`, {
+        dimension: key,
+      });
+    }
 
     statement.run(
       concreteLineId,

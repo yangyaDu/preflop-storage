@@ -6,6 +6,7 @@ import { formatBytes, formatNumber, markdownTable, safeRatio } from "../../analy
 import { parseCliArgs, getStringArg } from "../../cli/args";
 import { sum } from "../../utils/math";
 import { parseRangeDataTableName, quoteIdentifier } from "../../db/naming";
+import { PreflopStoreError } from "../../query/errors";
 
 interface FileSizeInfo {
   path: string;
@@ -230,7 +231,9 @@ function getTableBaseStats(db: Database, tableName: string, createSql: string | 
 function getRangeTableStats(db: Database, base: TableBaseStats): RangeTableStats {
   const dimension = parseRangeDataTableName(base.name);
   if (!dimension) {
-    throw new Error(`Range table name could not be parsed: ${base.name}`);
+    throw new PreflopStoreError("INVALID_FORMAT", `Range table name could not be parsed: ${base.name}`, {
+      tableName: base.name,
+    });
   }
 
   const aggregate = db
@@ -324,7 +327,9 @@ function getRangeTableStats(db: Database, base: TableBaseStats): RangeTableStats
 function getConcreteTableStats(db: Database, base: TableBaseStats): ConcreteTableStats {
   const match = base.name.match(/^concrete_lines_(.+)_([0-9]+)max_([0-9]+)BB$/);
   if (!match) {
-    throw new Error(`Concrete table name could not be parsed: ${base.name}`);
+    throw new PreflopStoreError("INVALID_FORMAT", `Concrete table name could not be parsed: ${base.name}`, {
+      tableName: base.name,
+    });
   }
 
   const aggregate = db
@@ -436,7 +441,9 @@ function getTableIndexes(db: Database, tableName: string): SqliteIndexInfo[] {
 function getPragmaNumber(db: Database, pragmaName: string): number {
   const row = db.query(`PRAGMA ${pragmaName}`).get() as Record<string, number>;
   const value = Object.values(row)[0];
-  if (typeof value !== "number") throw new Error(`Unexpected PRAGMA ${pragmaName} result`);
+  if (typeof value !== "number") {
+    throw new PreflopStoreError("INVALID_FORMAT", `Unexpected PRAGMA ${pragmaName} result`, { pragmaName });
+  }
   return value;
 }
 
@@ -542,4 +549,3 @@ ${markdownTable(["table", "kind", "rows", "indexes"], tableRows)}
 ${report.notes.map((note) => `- ${note}`).join("\n")}
 `;
 }
-

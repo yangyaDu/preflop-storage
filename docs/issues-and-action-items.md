@@ -103,22 +103,18 @@ bun run benchmark:cold --source range-db/range.db --dir range-db/range-strata-bi
 
 当前本机基线（2026-06-20）：9 个维度、90 runs、0 errors；aggregate store open+first-query p50 / p95 为 `340.36 ms / 2822.17 ms`，aggregate process elapsed p50 / p95 为 `518.28 ms / 3023.35 ms`。阶段拆分显示主要瓶颈是 `Dimension prewarm`，p50 / p95 为 `338.85 ms / 2820.40 ms`；首查 decode p50 / p95 仅 `0.46 ms / 0.70 ms`。Phase accounting 一致性：90 runs 最大 `unaccountedMs` 0.185ms。报告见 `reports/benchmark-cold-start.md`。
 
-### 7. 错误处理风格不一致
+### 7. 错误处理风格不一致 ✅ **已解决**
 
-**现状：** 项目中同时使用原始 `new Error()`（在二进制编解码层）和 `PreflopQueryError`（在查询服务层），存在混用风险。
+**最终状态（2026-06-21）：** scheme1 侧用户可见失败路径已统一迁移到 `PreflopStoreError`，调用方可以通过 `code` 路由处理构建、格式和参数错误。`rg -n "new Error\(" src/scheme1` 已无命中。
 
-**具体表现：**
+**已迁移：**
 
 | 文件 | 位置 | 问题 |
 |------|------|------|
-| `src/scheme1/importer/build-binary-store.ts` | 3 处 | `new Error("Output meta DB already exists...")` 等 |
-| `src/scheme1/cli/analyze-sqlite.ts` | 3 处 | 表名解析失败、PRAGMA 返回值校验使用 `new Error()` |
-| `src/scheme1/cli/benchmark-compare.ts` | 2 处 | 报告引擎类型校验使用 `new Error()` |
-| `src/scheme1/cli/verify.ts` | 3 处 | 数据缺失、action schema 缺失、参数错误使用 `new Error()` |
-
-Range Strata Binary 侧已统一为 `PreflopStoreError` / `PreflopQueryError`，scheme1 侧仍为原始 `Error`，调用方无法按错误码路由处理。
-
-**待办：** 将 scheme1 的 11 处 `new Error()` 迁移到 `PreflopStoreError`。
+| `src/scheme1/importer/build-binary-store.ts` | 4 处 | 输出已存在、构建语句缺失 → `BUILD_ERROR` |
+| `src/scheme1/cli/analyze-sqlite.ts` | 3 处 | 表名解析失败、PRAGMA 返回值异常 → `INVALID_FORMAT` |
+| `src/scheme1/cli/benchmark-compare.ts` | 2 处 | benchmark 报告引擎类型不匹配 → `INVALID_FORMAT` |
+| `src/scheme1/cli/verify-binary.ts` | 3 处 | 数据缺失、action schema 缺失 → `INVALID_FORMAT`；参数错误 → `INVALID_ARGUMENT` |
 
 ### 8. build-binary-store.ts 职责单石 ✅ **已解决**
 
@@ -268,11 +264,11 @@ import { RangeStrataQueryService } from "../src/range-strata-binary/query/servic
   3. ✅ Silent catch 块修复（#17，warnRecoverable 替代空 catch）
   4. ✅ package.json 脚本精简（35→22）+ CLI --help / 参数校验
   5. ✅ 文档路径和类名修正（18 处过期引用）
+  6. ✅ scheme1 错误处理迁移（#7，12 处 new Error() → PreflopStoreError）
   ↓
 P2 待办（推荐顺序）:
-  1. scheme1 错误处理迁移（#7，EXPEDIENT，约 11 处 new Error() → PreflopStoreError）
-  2. scheme1 @deprecated 标注（#10，EXPEDIENT）
-  3. Scheme1/Range Strata Binary CLI 合并（#9，PRUDENT，依赖 #7 和 #10 完成）
+  1. scheme1 @deprecated 标注（#10，EXPEDIENT）
+  2. Scheme1/Range Strata Binary CLI 合并（#9，PRUDENT，依赖 #10 完成）
   ↓
 P3 待办（低优先级，随主线演进逐步处理）:
   1. mmap unsafe 安全文档（#14，EXPEDIENT）
