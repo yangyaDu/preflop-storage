@@ -1,5 +1,6 @@
 import { runStandaloneVerify } from "./self-check";
 import { runSourceCross } from "./checks/source-cross";
+import { parseBuildManifestJson } from "../compiler/manifest";
 import type { BuildManifest } from "../compiler/types";
 import { createReport, writeJsonReport, writeMdReport, type RangeStrataVerifyReport, type VerifyFailure } from "./report";
 
@@ -38,8 +39,11 @@ export async function runCrossVerify(options: CrossVerifyOptions): Promise<Range
   try {
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
-    manifest = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf-8"));
-  } catch {
+    const parsed = parseBuildManifestJson(readFileSync(join(dir, "manifest.json"), "utf-8"));
+    if (!parsed.manifest) return { ...standaloneReport, mode: "cross", sourceDbPath };
+    manifest = parsed.manifest;
+  } catch (error) {
+    console.warn(`Warning: could not read manifest for cross-validation: ${error instanceof Error ? error.message : String(error)}`);
     // manifest.json is already broken — reuse standalone report
     return {
       ...standaloneReport,

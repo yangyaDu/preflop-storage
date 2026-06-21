@@ -19,6 +19,18 @@ try {
   });
 
   console.log(JSON.stringify(result, null, 2));
+} catch (error) {
+  console.error(formatCliError(error));
+  process.exitCode = 1;
 } finally {
-  await service.close();
+  try {
+    await service.close();
+  } catch (error) {
+    console.error(`Failed to close query service: ${formatCliError(error)}`);
+    process.exitCode = 1;
+  }
+}
+
+function formatCliError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

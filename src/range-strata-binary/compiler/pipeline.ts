@@ -20,6 +20,7 @@ import { filterDimensions } from "../../utils/dimension";
 import { getIdxFileName } from "../catalog/naming";
 import { initLightMetaDb } from "../catalog/schema";
 import { RangeIdxWriter } from "../index/writer";
+import { formatBuildManifestIssues, parseBuildManifestJson } from "./manifest";
 import { resolveBuildPlan } from "./plan";
 import type { BuildRangeStrataBinaryStoreOptions, BuildManifest, BuildReport, DimensionBuildStats } from "./types";
 import { cleanupPreviousOutput } from "./cleanup";
@@ -55,7 +56,9 @@ export async function buildRangeStrataBinaryStore(options: BuildRangeStrataBinar
   try {
     const s = await stat(options.sourceDbPath);
     sourceDbSizeBytes = s.size;
-  } catch { /* ignore */ }
+  } catch (error) {
+    warnRecoverable("Could not stat source DB; report source size will be 0", error);
+  }
 
   // Compute source DB checksum
   const sourceRangeDbChecksum = await computeFileSha256(options.sourceDbPath);
@@ -159,8 +162,14 @@ async function readBuildManifest(buildManifestPath: string): Promise<BuildManife
   if (!existsSync(buildManifestPath)) return null;
 
   try {
-    return JSON.parse(await Bun.file(buildManifestPath).text()) as BuildManifest;
-  } catch {
+    const parsed = parseBuildManifestJson(await Bun.file(buildManifestPath).text());
+    if (!parsed.manifest) {
+      console.warn(`[build] Ignoring invalid manifest at ${buildManifestPath}: ${formatBuildManifestIssues(parsed.issues)}`);
+      return null;
+    }
+    return parsed.manifest;
+  } catch (error) {
+    warnRecoverable(`Could not read manifest at ${buildManifestPath}`, error);
     return null;
   }
 }
@@ -203,11 +212,15 @@ async function buildDimensionWithStats(params: {
     try {
       const binStat = await stat(join(params.rangeStrataStoreDir, dimension.binFile));
       dimStat.binFileSizeBytes = binStat.size;
-    } catch { /* ignore */ }
+    } catch (error) {
+      warnRecoverable(`Could not stat built .bin file for ${dimensionKey(dimension)}`, error);
+    }
     try {
       const idxStat = await stat(join(params.rangeStrataStoreDir, getIdxFileName(dimension.strategy, dimension.playerCount, dimension.depthBb)));
       dimStat.idxFileSizeBytes = idxStat.size;
-    } catch { /* ignore */ }
+    } catch (error) {
+      warnRecoverable(`Could not stat built .idx file for ${dimensionKey(dimension)}`, error);
+    }
 
     dimStat.packCount = result.packCount;
     dimStat.concreteLineCount = result.concreteLineCount;
@@ -285,7 +298,9 @@ async function writeManifestAndReport(params: {
     const ms = await stat(metaDbPath);
     outputMetaDbSizeBytes = ms.size;
     outputTotalSizeBytes += ms.size;
-  } catch { /* ignore */ }
+  } catch (error) {
+    warnRecoverable("Could not stat output meta.db; report meta size will be 0", error);
+  }
   for (const s of dimensionBuildResults) {
     outputTotalSizeBytes += s.binFileSizeBytes + s.idxFileSizeBytes;
   }
@@ -391,8 +406,8 @@ function finalizeBuildStatements(statements: BuildStatements | null): void {
 function safeFinalizeStatement(statement: ReturnType<Database["prepare"]>): void {
   try {
     statement.finalize();
-  } catch {
-    // Ignore finalization races; Database.close() is still the final cleanup boundary.
+  } catch (error) {
+    warnRecoverable("Could not finalize a prepared statement before Database.close()", error);
   }
 }
 
@@ -606,9 +621,15 @@ async function computeFileSha256(filePath: string): Promise<string> {
   try {
     const bytes = await Bun.file(filePath).bytes();
     return createHash("sha256").update(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)).digest("hex");
-  } catch {
+  } catch (error) {
+    warnRecoverable(`Could not compute sha256 for ${filePath}; checksum will be recorded as unknown`, error);
     return "unknown";
   }
+}
+
+function warnRecoverable(message: string, error: unknown): void {
+  const detail = error instanceof Error ? error.message : String(error);
+  console.warn(`[build] ${message}: ${detail}`);
 }
 
 function dirnameSafe(filePath: string): string {

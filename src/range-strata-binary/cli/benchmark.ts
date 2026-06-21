@@ -223,6 +223,7 @@ async function runResultVerification(
     let mismatchCount = 0;
     let errorCount = 0;
     const mismatches: string[] = [];
+    const verificationErrors: string[] = [];
 
     const runner = new RangeStrataBenchmarkRunner(metaDbPath, binaryDir, runnerOptions);
     try {
@@ -258,8 +259,13 @@ async function runResultVerification(
               );
             }
           }
-        } catch {
+        } catch (error) {
           errorCount++;
+          if (verificationErrors.length < 10) {
+            verificationErrors.push(
+              `${item.strategy}_${item.playerCount}max_${item.depthBb}BB / ${item.concreteLineId} / ${item.holeCards}: ${formatUnknownError(error)}`,
+            );
+          }
         }
       }
     } finally {
@@ -274,9 +280,16 @@ async function runResultVerification(
     if (mismatches.length > 0) {
       notes.push(`First ${Math.min(10, mismatches.length)} mismatches: ${mismatches.join("; ")}`);
     }
+    if (verificationErrors.length > 0) {
+      notes.push(`First ${Math.min(10, verificationErrors.length)} verification errors: ${verificationErrors.join("; ")}`);
+    }
 
     return notes;
   } finally {
     db.close();
   }
+}
+
+function formatUnknownError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

@@ -296,13 +296,13 @@ bun run query `
 #### 构建
 
 ```powershell
-bun run build:binary --source range-db/range.db --out range-db/binary --overwrite
+bun run build --source range-db/range.db --out range-db/binary --overwrite
 ```
 
 #### 查询
 
 ```powershell
-bun run query:hand --dir range-db/binary --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand AA
+bun run query --dir range-db/binary --player-count 6 --depth-bb 100 --concrete-line-id 1 --hand AA
 ```
 
 ### 5. 分析脚本
@@ -310,7 +310,7 @@ bun run query:hand --dir range-db/binary --player-count 6 --depth-bb 100 --concr
 #### 分析旧 SQLite
 
 ```powershell
-bun run analyze:sqlite --source range-db/range.db --out reports/sqlite-analysis.json --md reports/sqlite-analysis.md
+bun run src/scheme1/cli/analyze-sqlite.ts --source range-db/range.db --out reports/sqlite-analysis.json --md reports/sqlite-analysis.md
 ```
 
 输出内容包括：
@@ -323,7 +323,7 @@ bun run analyze:sqlite --source range-db/range.db --out reports/sqlite-analysis.
 #### 分析二进制输出
 
 ```powershell
-bun run analyze:binary --dir range-db/binary --sqlite-report reports/sqlite-analysis.json --out reports/binary-analysis.json --md reports/storage-analysis.md
+bun run src/scheme1/cli/analyze-binary.ts --dir range-db/binary --sqlite-report reports/sqlite-analysis.json --out reports/binary-analysis.json --md reports/storage-analysis.md
 ```
 
 输出内容包括：
@@ -337,7 +337,8 @@ bun run analyze:binary --dir range-db/binary --sqlite-report reports/sqlite-anal
 #### 一键分析
 
 ```powershell
-bun run analyze
+bun run src/scheme1/cli/analyze-sqlite.ts --source range-db/range.db --out reports/sqlite-analysis.json --md reports/sqlite-analysis.md
+bun run src/scheme1/cli/analyze-binary.ts --dir range-db/binary --sqlite-report reports/sqlite-analysis.json --out reports/binary-analysis.json --md reports/storage-analysis.md
 ```
 
 ### 6. 校验脚本
@@ -381,13 +382,13 @@ bun run verify `
 旧校验脚本是：
 
 ```powershell
-bun run verify:binary
+bun run src/scheme1/cli/verify-binary.ts
 ```
 
 对应入口：
 
 ```text
-src/scheme1/cli/verify.ts
+src/scheme1/cli/verify-binary.ts
 ```
 
 注意：这条脚本当前主要用于 **Scheme1 二进制目录**，因为它依赖 `range_pack_index_*` 表做索引对照。
@@ -395,7 +396,7 @@ src/scheme1/cli/verify.ts
 #### 抽样校验
 
 ```powershell
-bun run verify:binary `
+bun run src/scheme1/cli/verify-binary.ts `
   --source range-db/range.db `
   --dir range-db/binary `
   --mode sample `
@@ -407,7 +408,7 @@ bun run verify:binary `
 #### 全量校验
 
 ```powershell
-bun run verify:binary `
+bun run src/scheme1/cli/verify-binary.ts `
   --source range-db/range.db `
   --dir range-db/binary `
   --mode full `
@@ -426,7 +427,7 @@ bun run benchmark:sqlite
 #### Scheme1 二进制
 
 ```powershell
-bun run benchmark:binary
+bun run src/scheme1/cli/benchmark-binary.ts
 ```
 
 #### Range Strata Binary 主线路径
@@ -521,12 +522,12 @@ range-db/binary/
 
 ## 代码里怎么用
 
-推荐直接使用 `Range Strata BinaryQueryService`：
+推荐直接使用 `RangeStrataQueryService`：
 
 ```ts
-import { Range Strata BinaryQueryService } from "./src/range-strata-binary/query/service";
+import { RangeStrataQueryService } from "./src/range-strata-binary/query/service";
 
-const service = new Range Strata BinaryQueryService("range-db/range-strata-binary/meta.db", "range-db/range-strata-binary", {
+const service = new RangeStrataQueryService("range-db/range-strata-binary/meta.db", "range-db/range-strata-binary", {
   verifyChecksums: false,
   maxOpenHandles: 3,
   prewarmActionSchemas: false,

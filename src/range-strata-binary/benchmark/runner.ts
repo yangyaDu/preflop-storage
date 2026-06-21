@@ -168,8 +168,8 @@ async function evictOsPageCache(): Promise<void> {
       await Bun.write("/proc/sys/vm/drop_caches", "1\n");
       await new Promise((resolve) => setTimeout(resolve, 100));
       return;
-    } catch {
-      // Fallback to large-file approach
+    } catch (error) {
+      warnRecoverable("Linux drop_caches failed; falling back to large-file cache eviction", error);
     }
   }
 
@@ -206,8 +206,15 @@ async function evictOsPageCache(): Promise<void> {
     // Clean up
     try {
       await import("node:fs/promises").then((m) => m.rm(cacheFiller, { force: true }));
-    } catch { /* ignore */ }
-  } catch {
-    // If file eviction fails, cold start will use warm cache
+    } catch (error) {
+      warnRecoverable(`Could not remove cache filler ${cacheFiller}`, error);
+    }
+  } catch (error) {
+    warnRecoverable("Best-effort cache eviction failed; cold-start measurement will use current OS cache state", error);
   }
+}
+
+function warnRecoverable(message: string, error: unknown): void {
+  const detail = error instanceof Error ? error.message : String(error);
+  console.warn(`[benchmark] ${message}: ${detail}`);
 }

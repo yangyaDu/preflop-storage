@@ -116,8 +116,12 @@ async function collectCompletedManifestStats(
         durationMs: 0,
         error: null,
       });
-    } catch {
-      // Missing or unreadable output is treated as incomplete and rebuilt.
+    } catch (error) {
+      console.warn(
+        `[build] Rebuilding incomplete dimension ${manifestDimensionKey(dimension)} because output files are missing or unreadable: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
   }
 

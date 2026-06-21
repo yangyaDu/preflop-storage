@@ -7,6 +7,7 @@ import { formatBytes, markdownTable } from "../../analysis/format";
 import { getBooleanArg, getNumberArg, getRepeatedStringArgs, getStringArg, parseCliArgs } from "../../cli/args";
 import { dimensionKey, quoteIdentifier } from "../../db/naming";
 import { parseRequestedDimension, type MemorySnapshot } from "../../benchmark/common";
+import { formatBuildManifestIssues, parseBuildManifestJson } from "../compiler/manifest";
 import type { BuildManifest, BuildManifestDimension } from "../compiler/types";
 
 type ColdStartMode = "process-cold" | "os-best-effort" | "linux-drop-cache";
@@ -304,20 +305,20 @@ async function runWorker(
 }
 
 function parseWorkerResult(stdoutText: string, exitCode: number): WorkerResult & { _validJson: boolean } {
+  let parsed: unknown;
   try {
-    return { ...JSON.parse(stdoutText) as WorkerResult, _validJson: true };
-  } catch {
-    return {
-      ok: false,
-      storeOpenAndFirstQueryMs: 0,
-      resultCount: 0,
-      memoryBefore: emptyMemorySnapshot(),
-      memoryAfter: emptyMemorySnapshot(),
-      timings: emptyWorkerTimings(),
-      error: `Worker did not return valid JSON. exitCode=${exitCode}, stdout=${stdoutText.slice(0, 500)}`,
-      _validJson: false,
-    };
+    parsed = JSON.parse(stdoutText);
+  } catch (error) {
+    return invalidWorkerResult(
+      `Worker did not return valid JSON. exitCode=${exitCode}, error=${formatUnknownError(error)}, stdout=${stdoutText.slice(0, 500)}`,
+    );
   }
+
+  if (!isWorkerResult(parsed)) {
+    return invalidWorkerResult(`Worker returned JSON with an unexpected shape. exitCode=${exitCode}, stdout=${stdoutText.slice(0, 500)}`);
+  }
+
+  return { ...parsed, _validJson: true };
 }
 
 async function evictCache(
@@ -551,12 +552,13 @@ function computeDatasetSize(dir: string): number {
     for (const entry of entries) {
       try {
         total += statSync(join(dir, entry)).size;
-      } catch {
-        // Skip files that disappear
+      } catch (error) {
+        warnRecoverable(`Skipping dataset size entry ${entry}`, error);
       }
     }
     return total;
-  } catch {
+  } catch (error) {
+    warnRecoverable(`Could not list dataset directory ${dir}; dataset size will be 0`, error);
     return 0;
   }
 }
@@ -634,7 +636,12 @@ function readSuccessfulDimensions(dir: string): BuildManifestDimension[] {
     throw new Error(`manifest.json was not found in ${dir}. Build Range Strata Binary output first.`);
   }
 
-  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as BuildManifest;
+  const parsed = parseBuildManifestJson(readFileSync(manifestPath, "utf8"));
+  if (!parsed.manifest) {
+    throw new Error(`manifest.json is invalid: ${formatBuildManifestIssues(parsed.issues)}`);
+  }
+
+  const manifest: BuildManifest = parsed.manifest;
   return manifest.dimensions
     .filter((dimension) => dimension.status !== "failed")
     .sort((left, right) => dimensionKey(left).localeCompare(dimensionKey(right)));
@@ -834,6 +841,74 @@ function emptyMemorySnapshot(): MemorySnapshot {
     externalBytes: 0,
     arrayBuffersBytes: 0,
   };
+}
+
+function invalidWorkerResult(error: string): WorkerResult & { _validJson: false } {
+  return {
+    ok: false,
+    storeOpenAndFirstQueryMs: 0,
+    resultCount: 0,
+    memoryBefore: emptyMemorySnapshot(),
+    memoryAfter: emptyMemorySnapshot(),
+    timings: emptyWorkerTimings(),
+    error,
+    _validJson: false,
+  };
+}
+
+function isWorkerResult(value: unknown): value is WorkerResult {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.ok === "boolean" &&
+    isFiniteNumber(value.storeOpenAndFirstQueryMs) &&
+    isFiniteNumber(value.resultCount) &&
+    isMemorySnapshot(value.memoryBefore) &&
+    isMemorySnapshot(value.memoryAfter) &&
+    isColdWorkerTimings(value.timings) &&
+    (value.error === null || typeof value.error === "string")
+  );
+}
+
+function isMemorySnapshot(value: unknown): value is MemorySnapshot {
+  if (!isRecord(value)) return false;
+  return (
+    isFiniteNumber(value.rssBytes) &&
+    isFiniteNumber(value.heapTotalBytes) &&
+    isFiniteNumber(value.heapUsedBytes) &&
+    isFiniteNumber(value.externalBytes) &&
+    isFiniteNumber(value.arrayBuffersBytes)
+  );
+}
+
+function isColdWorkerTimings(value: unknown): value is ColdWorkerTimings {
+  if (!isRecord(value)) return false;
+  return (
+    isFiniteNumber(value.supportModuleImportMs) &&
+    isFiniteNumber(value.argsParseMs) &&
+    isFiniteNumber(value.queryServiceImportMs) &&
+    isFiniteNumber(value.memorySnapshotMs) &&
+    isFiniteNumber(value.serviceConstructorMs) &&
+    isFiniteNumber(value.dimensionPrewarmMs) &&
+    isFiniteNumber(value.firstQueryMs) &&
+    isFiniteNumber(value.closeMs) &&
+    isFiniteNumber(value.workerTotalMs)
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function warnRecoverable(message: string, error: unknown): void {
+  console.warn(`[cold-benchmark] ${message}: ${formatUnknownError(error)}`);
+}
+
+function formatUnknownError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function emptyWorkerTimings(): ColdWorkerTimings {

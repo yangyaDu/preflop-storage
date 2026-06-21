@@ -591,7 +591,7 @@ export class RangeStrataQueryService {
 
     try {
       const flatBuffer = handle.queryBatchFlat(rustRequests, this.options.verifyChecksums ?? false);
-      return this.parseFlatBatchResult(flatBuffer as unknown as Buffer, requests, requestIndexes, invalidHandErrors);
+      return this.parseFlatBatchResult(flatBuffer, requests, requestIndexes, invalidHandErrors);
     } catch (error) {
       return this.toBatchFatalErrorResults(requests, invalidHandErrors, error);
     }
@@ -616,18 +616,19 @@ export class RangeStrataQueryService {
    * DecodedCellResult objects.
    */
   private parseFlatBatchResult(
-    rawBuffer: Buffer | Uint8Array,
+    rawBuffer: unknown,
     requests: BatchHandStrategyRequest[],
     requestIndexes: number[],
     invalidHandErrors: Map<number, PreflopQueryErrorInfo>,
   ): BatchHandStrategyResult[] {
     // napi-rs Vec<u8> returns different types depending on runtime (Node Buffer, Bun Uint8Array, etc.).
     // Normalize to a Uint8Array so we can reliably access .buffer/.byteOffset/.byteLength.
-    const flat = rawBuffer instanceof Uint8Array ? rawBuffer : new Uint8Array(rawBuffer as Iterable<number>);
+    const flat = this.normalizeFlatBatchBuffer(rawBuffer);
     const view = new DataView(flat.buffer, flat.byteOffset, flat.byteLength);
     let offset = 0;
 
     // Header
+    this.assertFlatBytesAvailable(flat, offset, 12, "header");
     const magic = view.getUint32(offset, true);
     if (magic !== FLAT_MAGIC) {
       throw new PreflopStoreError("INVALID_FORMAT", `Invalid flat buffer magic: 0x${magic.toString(16)}`, { expected: FLAT_MAGIC, got: magic });
@@ -636,9 +637,17 @@ export class RangeStrataQueryService {
     const requestCount = view.getUint32(offset, true);
     offset += 4;
     /* hitCount = */ offset += 4;
+    if (requestCount !== requestIndexes.length) {
+      throw new PreflopStoreError("INVALID_FORMAT", `Flat buffer request count mismatch: expected ${requestIndexes.length}, got ${requestCount}`, {
+        expected: requestIndexes.length,
+        got: requestCount,
+      });
+    }
 
     // Per-request table
+    this.assertFlatBytesAvailable(flat, offset, requestCount * 8, "per-request table");
     const perRequestMeta: { cellCount: number; schemaId: number }[] = [];
+    let totalCellCount = 0;
     for (let i = 0; i < requestCount; i++) {
       const cellCount = view.getUint16(offset, true);
       offset += 2;
@@ -646,7 +655,9 @@ export class RangeStrataQueryService {
       const schemaId = view.getUint32(offset, true);
       offset += 4;
       perRequestMeta.push({ cellCount, schemaId });
+      totalCellCount += cellCount;
     }
+    this.assertFlatBytesAvailable(flat, offset, totalCellCount * FLAT_CELL_SIZE, "cell data");
 
     // Pre-warm all needed action schemas in one batch
     for (const { cellCount, schemaId } of perRequestMeta) {
@@ -702,6 +713,13 @@ export class RangeStrataQueryService {
     }
 
     // Assemble final results
+    if (offset !== flat.byteLength) {
+      throw new PreflopStoreError("INVALID_FORMAT", "Flat batch buffer has trailing bytes", {
+        parsedBytes: offset,
+        bufferBytes: flat.byteLength,
+      });
+    }
+
     return requests.map((request, i) => {
       const invalidHandError = invalidHandErrors.get(i);
       if (invalidHandError) {
@@ -722,6 +740,50 @@ export class RangeStrataQueryService {
       }
 
       return { ...request, strategy, error: null };
+    });
+  }
+
+  private normalizeFlatBatchBuffer(rawBuffer: unknown): Uint8Array {
+    if (rawBuffer instanceof Uint8Array) return rawBuffer;
+    if (rawBuffer instanceof ArrayBuffer) return new Uint8Array(rawBuffer);
+
+    const arrayLike = this.asArrayLike(rawBuffer);
+    if (!arrayLike) {
+      throw new PreflopStoreError("INVALID_FORMAT", "queryBatchFlat returned a non-byte-buffer value", {
+        valueType: typeof rawBuffer,
+      });
+    }
+
+    const flat = new Uint8Array(arrayLike.length);
+    for (let i = 0; i < arrayLike.length; i++) {
+      const byte = arrayLike[i];
+      if (typeof byte !== "number" || !Number.isInteger(byte) || byte < 0 || byte > 255) {
+        throw new PreflopStoreError("INVALID_FORMAT", `queryBatchFlat returned an invalid byte at offset ${i}`, {
+          offset: i,
+          value: typeof byte === "number" ? byte : String(byte),
+        });
+      }
+      flat[i] = byte;
+    }
+    return flat;
+  }
+
+  private asArrayLike(value: unknown): ArrayLike<unknown> | null {
+    if ((typeof value !== "object" && typeof value !== "function") || value === null) return null;
+
+    const maybeArrayLike = value as { length?: unknown };
+    const length = maybeArrayLike.length;
+    if (typeof length !== "number" || !Number.isSafeInteger(length) || length < 0) return null;
+    return value as ArrayLike<unknown>;
+  }
+
+  private assertFlatBytesAvailable(flat: Uint8Array, offset: number, byteLength: number, section: string): void {
+    if (offset + byteLength <= flat.byteLength) return;
+
+    throw new PreflopStoreError("INVALID_FORMAT", `Flat batch buffer is truncated while reading ${section}`, {
+      offset,
+      requiredBytes: byteLength,
+      bufferBytes: flat.byteLength,
     });
   }
 

@@ -20,5 +20,52 @@
       "suggestion": 2
     },
     "scope": "entire project"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "Tech Debt Assessment",
+    "score": 75,
+    "findings": {
+      "critical": 1,
+      "warning": 2,
+      "suggestion": 0
+    },
+    "scope": "sampled Scheme2 build/query path and native addon protocol"
+  },
+  {
+    "date": "2026-06-21",
+    "mode": "Health Dashboard",
+    "score": 75,
+    "findings": {
+      "critical": 5,
+      "warning": 16,
+      "suggestion": 12
+    },
+    "dimensions": {
+      "architecture": { "score": 82, "critical": 0, "warning": 3, "suggestion": 2 },
+      "techDebt": { "score": 70, "critical": 3, "warning": 5, "suggestion": 3 },
+      "testQuality": { "score": 72, "critical": 1, "warning": 5, "suggestion": 4 },
+      "prQuality": { "score": 75, "critical": 1, "warning": 3, "suggestion": 3 }
+    },
+    "scope": "entire project (69 TS files + 6 Rust files + 12 test files)",
+    "note": "C5 (scheme1 untested) excluded — scheme1 is a comparison baseline"
+  },
+  {
+    "date": "2026-06-21",
+    "mode": "Health Dashboard (Re-Audit)",
+    "score": 81,
+    "findings": {
+      "critical": 1,
+      "warning": 11,
+      "suggestion": 10
+    },
+    "dimensions": {
+      "architecture": { "score": 82, "critical": 0, "warning": 3, "suggestion": 2 },
+      "techDebt": { "score": 82, "critical": 0, "warning": 5, "suggestion": 3 },
+      "testQuality": { "score": 72, "critical": 1, "warning": 5, "suggestion": 4 },
+      "prQuality": { "score": 88, "critical": 0, "warning": 1, "suggestion": 3 }
+    },
+    "scope": "16 changed files — fix verification for C1-C4, C6, W12, W14",
+    "note": "scheme1 treated as comparison baseline"
   }
 ]

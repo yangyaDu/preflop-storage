@@ -294,14 +294,14 @@ bun run query --dir range-db/binary-missing-bin --meta range-db/binary-missing-b
 
 测试目标：
 
-验证 `Range Strata BinaryQueryService.getHandsByAction()` 不传 `actionNames` 时可以返回 pack 中所有手牌。
+验证 `RangeStrataQueryService.getHandsByAction()` 不传 `actionNames` 时可以返回 pack 中所有手牌。
 
 示例代码：
 
 ```ts
-import { Range Strata BinaryQueryService } from "../src/range-strata-binary/query/service";
+import { RangeStrataQueryService } from "../src/range-strata-binary/query/service";
 
-const service = new Range Strata BinaryQueryService("range-db/binary-smoke/meta.db", "range-db/binary-smoke");
+const service = new RangeStrataQueryService("range-db/binary-smoke/meta.db", "range-db/binary-smoke");
 
 const result = await service.getHandsByAction({
   strategy: "default",
