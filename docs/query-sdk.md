@@ -1,17 +1,17 @@
 # Query SDK 使用说明
 
-本文档说明业务侧如何通过查询服务读取策略数据。当前推荐 **Range Strata BinaryQueryService**（Rust 热路径 + .idx/.bin 文件），性能远优于旧方案。
+本文档说明业务侧如何通过查询服务读取策略数据。当前推荐 **RangeStrataQueryService**（Rust 热路径 + .idx/.bin 文件），性能远优于旧方案。
 
-## 推荐方案：Range Strata BinaryQueryService（方案二 + Rust）
+## 推荐方案：RangeStrataQueryService（方案二 + Rust）
 
 热路径为 Rust napi-rs DimensionHandle（mmap .idx + .bin），冷路径（场景元数据、action schema）走 meta.db SQLite。
 
 ### 初始化
 
 ```ts
-import { Range Strata BinaryQueryService } from "../src/range-strata-binary/query/service";
+import { RangeStrataQueryService } from "../src/range-strata-binary/query/service";
 
-const service = new Range Strata BinaryQueryService("range-db/range-strata-binary/meta.db", "range-db/range-strata-binary", {
+const service = new RangeStrataQueryService("range-db/range-strata-binary/meta.db", "range-db/range-strata-binary", {
   verifyChecksums: false,
   maxOpenHandles: 3,                // LRU mmap handle 池大小（默认 3）
   prewarmActionSchemas: false,      // true = 启动时全量加载所有 action schema
@@ -116,7 +116,7 @@ service.close();
 ### 初始化
 
 ```ts
-import { PreflopQueryService } from "../src/query/preflop-query-service";
+import { PreflopQueryService } from "../src/scheme1/query/preflop-query-service";
 
 const service = new PreflopQueryService("range-db/binary/meta.db", "range-db/binary", {
   verifyChecksums: false,

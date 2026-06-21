@@ -432,9 +432,9 @@ bun run benchmark:cold `
 已自动化覆盖：
 
 1. 用例 1：`bun test` 覆盖二进制 codec、CRC、header、range pack、idx reader/writer。
-2. 用例 2：`tests/range-strata-compile.test.ts` 覆盖小样本构建与生成物结构。
+2. 用例 2：`tests/range-strata-compile.test.ts` + `tests/range-strata-compile-cleanup.test.ts` + `tests/range-strata-compile-plan.test.ts` 覆盖小样本构建、生成物结构、cleanup 逻辑和 build plan 解析。
 3. 用例 3、4、8、9、10：`tests/range-strata-compile.test.ts` 覆盖单手牌查询、CRC 校验、非法手牌、不存在 concrete line、缺失二进制文件。
-4. 用例 11、12：`tests/range-strata-query-service.test.ts` 覆盖 `getHandsByAction()` 全量返回、按 action 筛选和 `minFrequency` 边界。
+4. 用例 11、12：`tests/range-strata-query-service.test.ts`（7 个用例）覆盖空批量请求、不存在维度、`getHandsByAction()` 全量返回、按 action 筛选、`minFrequency` 边界、`handEV=null` 与 `handEV=0` 区分。
 5. 用例 13：`tests/float32-precision.test.ts` 和 `tests/range-strata-verify.test.ts` 覆盖 Float32 bit-exact 策略与 source cross 校验。
 6. 用例 14：`tests/binary-codec.test.ts` 覆盖 action mask 语义，`tests/range-strata-query-service.test.ts` 覆盖 `handEV=null` 与 `handEV=0` 区分。
 7. 用例 16：`tests/cold-start-benchmark.test.ts` 覆盖默认读取 manifest 中全部成功维度、维度过滤和失败维度隔离。

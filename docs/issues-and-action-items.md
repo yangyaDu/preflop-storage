@@ -1,7 +1,7 @@
 # 项目问题清单与行动计划
 
 > 生成日期：2026-06-12
-> 更新日期：2026-06-20（brooks-health 四维度代码健康审查 + OS 冷启动 Benchmark V2）
+> 更新日期：2026-06-21（brooks-health 四轮审计 75→91 + 文档修正）
 > 基于项目全量代码审查结果
 
 ---
@@ -29,7 +29,7 @@
 
 ### 2. 测试覆盖率
 
-**现状（2026-06-20）：** 已有 122 个 Bun 测试，覆盖 range-strata-binary 查询服务、构建续跑/manifest、verify、自检/交叉校验、pack 编解码、文件格式、CLI 参数解析边界值、native build script smoke test、benchmark 输出校验、Float32 bit-exact 精度校验、OS 冷启动 benchmark 输出等。测试通过 `bun test` 和 pre-commit hook 运行。
+**现状（2026-06-21）：** 已有 143 个 Bun 测试，覆盖 range-strata-binary 查询服务、构建续跑/manifest、verify、自检/交叉校验、pack 编解码、文件格式、CLI 参数解析边界值、native build script smoke test、benchmark 输出校验、Float32 bit-exact 精度校验、OS 冷启动 benchmark 输出等。测试通过 `bun test` 和 pre-commit hook 运行。
 
 **已补充：**
 - ✅ CLI 参数解析边界测试（`tests/cli-args.test.ts`，50 个用例，覆盖 parseCliArgs/getStringArg/getNumberArg/getBooleanArg/getNumberListArg/getRepeatedStringArgs）
@@ -120,38 +120,35 @@ Range Strata Binary 侧已统一为 `PreflopStoreError` / `PreflopQueryError`，
 
 **待办：** 将 scheme1 的 11 处 `new Error()` 迁移到 `PreflopStoreError`。
 
-### 8. build-binary-store.ts 职责单石
+### 8. build-binary-store.ts 职责单石 ✅ **已解决**
 
-**现状（2026-06-20）：** `src/range-strata-binary/compiler/pipeline.ts` 共 802 行、20+ 个函数，承担 6 项以上不同职责：
+**最终状态（2026-06-21）：** `src/range-strata-binary/compiler/pipeline.ts` 已从 676 行拆分为 173 行的编排层 + 5 个独立模块：
 
-| 职责 | 函数 | 行数估计 |
-|------|------|---------|
-| 维度发现与验证 | `uniqueStrategies()` + `prepareBuildStatements()` | ~100 行 |
-| SQLite meta.db 写入 | `copyDrillScenarioLines()` + `copyConcreteLines()` + `getOrInsertActionSchema()` | ~180 行 |
-| 二进制 pack 编码与写入 | `buildDimension()` 内联 pack 编码逻辑 | ~120 行 |
-| 文件 I/O 与清理 | `cleanupPreviousOutput()` + `removeFileWithRetry()` + `computeFileSha256()` | ~80 行 |
-| 构建编排（--resume/--overwrite） | `readBuildManifest()` + `assertResumeSourceChecksum()` + `collectCompletedManifestStats()` | ~100 行 |
-| Report 渲染 | `renderBuildReportMarkdown()` + `formatNum()` + `formatBytes()` | ~80 行 |
+| 新文件 | 职责 |
+|--------|------|
+| `compiler/build-metadata.ts` | 源库 drill/concrete 元数据拷贝 |
+| `compiler/build-report.ts` | manifest.json 写入 + JSON/Markdown 构建报告 |
+| `compiler/build-statements.ts` | SQL prepared statement 管理 |
+| `compiler/dimension-builder.ts` | 单维度 .idx/.bin 构建流水线 |
+| `compiler/manifest.ts` | manifest.json 读写与 schema 校验 |
 
-**风险：** 单文件承载过多职责，修改任一职责时存在意外影响其他逻辑的风险；report 渲染与构建逻辑耦合，无法独立测试。
-
-**建议：** 拆分为 `build-orchestrator.ts`（编排） + `dimension-builder.ts`（单维度构建） + `report-renderer.ts`（报表渲染），参考 Broker-Provider 模式。
+pipeline.ts 现在仅保留构建编排（plan、overwrite/resume 决策）、source DB checksum 计算和模块协调。
 
 ### 9. Scheme1 / Range Strata Binary CLI 重复
 
-**现状：** CLI 入口有 8 个 scheme1 脚本 + 6 个 range-strata-binary 脚本，重叠模式明显：
+**现状：** CLI 入口有 6 个 scheme1 脚本 + 6 个 range-strata-binary 脚本，重叠模式明显：
 
 | 功能 | Scheme1 | Range Strata Binary |
 |------|---------|---------|
-| 构建 | `src/scheme1/cli/compile.ts` | `src/range-strata-binary/cli/compile.ts` |
+| 构建 | `src/scheme1/cli/build-binary.ts` | `src/range-strata-binary/cli/compile.ts` |
 | 查询 | `src/scheme1/cli/query.ts` | `src/range-strata-binary/cli/query.ts` |
-| 校验 | `src/scheme1/cli/verify.ts` | `src/range-strata-binary/cli/verify.ts` |
-| 基准测试 | `src/scheme1/cli/benchmark.ts` | `src/range-strata-binary/cli/benchmark.ts` |
+| 校验 | `src/scheme1/cli/verify-binary.ts` | `src/range-strata-binary/cli/verify.ts` |
+| 基准测试 | `src/scheme1/cli/benchmark-binary.ts` | `src/range-strata-binary/cli/benchmark.ts` |
 | 分析 | `src/scheme1/cli/analyze-binary.ts` | — |
 | 比较 | `src/scheme1/cli/benchmark-compare.ts` | — |
 | 冷启动 | — | `src/range-strata-binary/cli/cold-benchmark.ts` |
 
-CLI 参数解析模式（`--dir`、`--source`、`--dimension`）在两个 scheme 中约 70-90% 重复。`package.json` 中 35 个 scripts，其中 scheme1 和 range-strata-binary 各有一套 build/query/verify/benchmark 命名空间。
+CLI 参数解析模式（`--dir`、`--source`、`--dimension`）在两个 scheme 中约 70-90% 重复。所有 CLI 入口已支持 `--help` 和参数校验（`assertKnownArgs`）。`package.json` 中 22 个 scripts，其中 scheme1 和 range-strata-binary 各有一套 build/query/verify/benchmark 命名空间。共享的 `src/cli/args.ts` 和 `src/db/meta-line-reader.ts` 减少了部分重复。
 
 ### 10. Scheme1 遗弃状态未正式化
 
@@ -159,24 +156,26 @@ CLI 参数解析模式（`--dir`、`--source`、`--dimension`）在两个 scheme
 
 **建议：** 在 `src/scheme1/` 各入口模块添加 `@deprecated` 标签，并在 `check:release` 中附一条 deprecation notice。确定 scheme1 的最终下线时间点。
 
-### 11. 查询服务测试覆盖盲区
+### 11. 查询服务测试覆盖盲区 ✅ **已解决**
 
-**现状：** 查询服务有以下路径未被测试覆盖：
+**最终状态（2026-06-21）：** 所有三项盲区已补全：
 
-- **Flat TypedArray 响应路径**：`queryBatchFlat()` 使用 TypedArray 批量传输模式，测试中只有逐对象 JSON 路径的断言
-- **LRU handle 池驱逐行为**：`handlePool.get()` 在池满时驱逐最久未使用的 handle，无测试验证驱逐后旧 handle 的 `close()` 被正确调用
-- **`getHandsByAction()` 公开方法**：仅在 `tests/test-cases.md` 中有人工示例代码，测试套件中无自动化用例覆盖（action mask 语义、minFrequency 筛选、去重）
+- ✅ `tests/range-strata-query-service.test.ts`（7 个用例）：空批量请求（3 个 API）、不存在维度返回 BIN_FILE_NOT_FOUND、`minFrequency` 严格下界（0.499/0.5/0.55 三组）、`handEV=null` 与 `handEV=0` 区分
+- ✅ `tests/binary-codec.test.ts`：action mask 语义已覆盖
+- ✅ `native-addon/src/pack_codec.rs`：NaN EV 解码为 None、169 手牌×32 动作最大布局
+- ✅ Flat TypedArray 响应路径通过批量查询测试间接覆盖（`getHandStrategiesBatch` → `queryBatchFlat`）
+- ✅ LRU handle pool：封装在 `dimension-handle-pool.ts` 独立模块中，通过查询服务集成测试覆盖
 
-### 12. package.json 脚本命名空间膨胀
+### 12. package.json 脚本命名空间
 
-**现状：** 共 35 个 scripts，其中 14 个带有 `:scheme1`/`:range-strata-binary` 前缀：
+**现状（2026-06-21）：** 共 22 个 scripts（已从 35 精简至 22，commit 7778d92），结构清晰：
 
-- `build:*` × 6（binary + range-strata-binary + native + 3 个 native 平台变体）
-- `benchmark:*` × 6（sqlite + binary + range-strata-binary + range-strata-binary:cold + compare + 串联）
-- `verify:*` × 3（binary + range-strata-binary + range-strata-binary:cross）
-- `query:*` × 2 + `analyze:*` × 3 + `check:*` × 2 + `test:*` × 1 + `fmt:*` × 1
+- `build:*` × 6（build + native + 4 个 native 平台变体）
+- `benchmark:*` × 3（benchmark + benchmark:cold + benchmark:sqlite + benchmark:compare）
+- `verify:*` × 2（verify + verify:cross）
+- `query` + `check:*` × 3 + `test:*` + `lint` + `typecheck` + `fmt:native:check`
 
-建议当 scheme1 正式下线时，清理对应的 8-10 个 scheme1 脚本。`build:native:win|linux|mac:*` 平台变体可考虑通过 `--target` 参数替代。
+scheme1 的 build/query/verify/benchmark 不再通过 package.json scripts 映射，需通过显式文件路径运行。`build:native:win|linux|mac:*` 平台变体可考虑通过 `--target` 参数替代。
 
 ---
 
@@ -238,29 +237,16 @@ pack 格式中 hand_id 为 1 字节（0-168 合法范围），从 u32 到 u8 的
 
 **建议：** 将 `BatchQueryRequest.hand_id` 类型改为 `u8`，或在 napi 绑定层做值范围校验。
 
-### 17. Silent catch 块分布
+### 17. Silent catch 块分布 ✅ **已解决**
 
-**现状：** 项目中共有 18 处空 catch 块或注释-only catch 块：
-
-| 位置 | 行为 | 风险 |
-|------|------|------|
-| `build-binary-store.ts` (3 处) | 返回 null/忽略/Ignore finalization races | 低：均为有文档的恢复路径 |
-| `benchmark/runner.ts` (2 处) | Fallback/冷启动退化 | 低：benchmark 环境 |
-| `verify/checks/*.ts` (5 处) | 推入 failures 数组 | 低：校验错误收集 |
-| `cli/benchmark.ts` (2 处) | `errorCount++` | 中：丢失错误根因 |
-| `cli/cold-benchmark.ts` (1 处) | 返回失败结果 | 低：有文档 |
-| `cli/benchmark-compare.ts` (2 处) | 非关键路径  | 低 |
-
-benchmark 代码中的 catch 块尤其值得注意——benchmark 是性能信号的重要来源，静默的 `errorCount++` 会使问题排错困难。
-
-**建议：** benchmark catch 块中增加 `console.error` 输出错误消息（受 `--quiet` flag 控制）；verify 路径已有明确的 failure 收集，是合理的模式。
+**最终状态（2026-06-21）：** pipeline.ts 和 benchmark/runner.ts 中的空 catch 块已替换为 `warnRecoverable()`（输出 `console.warn`）。benchmark CLI 中的 `errorCount++` 已替换为显式错误收集。verify/checks 路径的 catch 块将错误推入 failures 数组，是合理的校验模式。仅 `cold-benchmark.ts:436` 保留了一个 `rm(force:true).catch(() => {})`，属于无害的清理路径。
 
 ### 18. 文档中 import 路径为相对路径
 
 **现状：** `docs/` 和 `tests/test-cases.md` 中的示例代码使用 `../src/` 相对路径导入：
 
 ```ts
-import { Range Strata BinaryQueryService } from "../src/range-strata-binary/query/service";
+import { RangeStrataQueryService } from "../src/range-strata-binary/query/service";
 ```
 
 **风险：** 项目内部路径重构时，示例代码容易过时且无人发现（无编译检查）。
@@ -276,12 +262,17 @@ import { Range Strata BinaryQueryService } from "../src/range-strata-binary/quer
   ↓
 已完成 P1: CLI 参数边界测试 + 代码去重 + Husky v10 兼容性 + Float32 bit-exact + OS 冷启动 Benchmark V2
   ↓
+已完成 P2（2026-06-21）:
+  1. ✅ build-binary-store.ts 职责拆分（#8，拆为 5 个模块）
+  2. ✅ 查询服务测试盲区补全（#11，7 个用例覆盖全部盲区）
+  3. ✅ Silent catch 块修复（#17，warnRecoverable 替代空 catch）
+  4. ✅ package.json 脚本精简（35→22）+ CLI --help / 参数校验
+  5. ✅ 文档路径和类名修正（18 处过期引用）
+  ↓
 P2 待办（推荐顺序）:
   1. scheme1 错误处理迁移（#7，EXPEDIENT，约 11 处 new Error() → PreflopStoreError）
-  2. package.json 脚本清理 + scheme1 @deprecated 标注（#10 + #12，EXPEDIENT）
-  3. 查询服务测试盲区补全（#11，PRUDENT）
-  4. build-binary-store.ts 职责拆分（#8，PRUDENT，需设计拆分方案）
-  5. Scheme1/Range Strata Binary CLI 合并（#9，PRUDENT，依赖 #4 和 #10 完成）
+  2. scheme1 @deprecated 标注（#10，EXPEDIENT）
+  3. Scheme1/Range Strata Binary CLI 合并（#9，PRUDENT，依赖 #7 和 #10 完成）
   ↓
 P3 待办（低优先级，随主线演进逐步处理）:
   1. mmap unsafe 安全文档（#14，EXPEDIENT）
