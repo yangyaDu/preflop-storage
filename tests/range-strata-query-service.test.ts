@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildRangeStrataBinaryStore } from "../src/range-strata-binary/compiler/pipeline";
 import { RangeStrataQueryService } from "../src/range-strata-binary/query/service";
+import { PreflopQueryError } from "../src/query/errors";
 
 const tempDirs: string[] = [];
 
@@ -73,6 +74,133 @@ describe("RangeStrataQueryService", () => {
       service.close();
     }
   });
+
+  test("empty batch requests return empty results without opening a dimension", async () => {
+    const { outDir } = await buildFixture();
+    const service = new RangeStrataQueryService(join(outDir, "meta.db"), outDir);
+
+    try {
+      await expect(
+        service.getHandStrategiesBatch({
+          playerCount: 6,
+          depthBb: 999,
+          requests: [],
+        }),
+      ).resolves.toEqual([]);
+
+      expect(
+        service.getHandStrategiesBatchSync({
+          playerCount: 6,
+          depthBb: 999,
+          requests: [],
+        }),
+      ).toEqual([]);
+
+      expect(
+        service.getHandStrategiesCountBatchSync({
+          playerCount: 6,
+          depthBb: 999,
+          requests: [],
+        }),
+      ).toBe(0);
+    } finally {
+      service.close();
+    }
+  });
+
+  test("non-existent dimensions report BIN_FILE_NOT_FOUND instead of masking the failure", async () => {
+    const { outDir } = await buildFixture();
+    const service = new RangeStrataQueryService(join(outDir, "meta.db"), outDir);
+
+    try {
+      await expect(
+        service.getHandStrategy({
+          playerCount: 6,
+          depthBb: 999,
+          concreteLineId: 1,
+          holeCards: "AA",
+        }),
+      ).rejects.toMatchObject({ code: "BIN_FILE_NOT_FOUND" });
+
+      const batch = await service.getHandStrategiesBatch({
+        playerCount: 6,
+        depthBb: 999,
+        requests: [{ concreteLineId: 1, holeCards: "AA" }],
+      });
+
+      expect(batch).toHaveLength(1);
+      expect(batch[0].strategy).toBeNull();
+      expect(batch[0].error?.code).toBe("BIN_FILE_NOT_FOUND");
+
+      expect(() =>
+        service.getHandStrategySync({
+          playerCount: 6,
+          depthBb: 999,
+          concreteLineId: 1,
+          holeCards: "AA",
+        }),
+      ).toThrow(PreflopQueryError);
+    } finally {
+      service.close();
+    }
+  });
+
+  test("getHandsByAction applies minFrequency as a strict lower bound", async () => {
+    const { outDir } = await buildFixture();
+    const service = new RangeStrataQueryService(join(outDir, "meta.db"), outDir);
+
+    try {
+      const atBoundary = await service.getHandsByAction({
+        playerCount: 6,
+        depthBb: 100,
+        concreteLineId: 1,
+        actionNames: ["call"],
+        minFrequency: 0.5,
+      });
+      const belowBoundary = await service.getHandsByAction({
+        playerCount: 6,
+        depthBb: 100,
+        concreteLineId: 1,
+        actionNames: ["call"],
+        minFrequency: 0.499,
+      });
+      const aboveBoundary = await service.getHandsByAction({
+        playerCount: 6,
+        depthBb: 100,
+        concreteLineId: 1,
+        actionNames: ["call"],
+        minFrequency: 0.55,
+      });
+
+      expect(atBoundary).toEqual(["KK"]);
+      expect(belowBoundary).toEqual(["AA", "KK"]);
+      expect(aboveBoundary).toEqual(["KK"]);
+    } finally {
+      service.close();
+    }
+  });
+
+  test("handEV preserves null separately from zero", async () => {
+    const { outDir } = await buildFixture();
+    const service = new RangeStrataQueryService(join(outDir, "meta.db"), outDir);
+
+    try {
+      const result = await service.getHandStrategy({
+        playerCount: 6,
+        depthBb: 100,
+        concreteLineId: 1,
+        holeCards: "KK",
+      });
+
+      expect(result?.actions).toEqual([
+        expect.objectContaining({ actionName: "fold", handEV: null }),
+        expect.objectContaining({ actionName: "call", handEV: 0 }),
+        expect.objectContaining({ actionName: "raise", handEV: 3 }),
+      ]);
+    } finally {
+      service.close();
+    }
+  });
 });
 
 async function buildFixture(): Promise<{ outDir: string }> {
@@ -128,8 +256,11 @@ async function buildFixture(): Promise<{ outDir: string }> {
       )
       VALUES
         (1, 'AA', 'fold', 0, 0, 0.1, 0),
-        (1, 'AA', 'call', 0, 0, 0.2, 1),
+        (1, 'AA', 'call', 0, 0, 0.5, 1),
         (1, 'AA', 'raise', 40, 2, 0.7, 2),
+        (1, 'KK', 'fold', 0, 0, 0.3, NULL),
+        (1, 'KK', 'call', 0, 0, 0.6, 0),
+        (1, 'KK', 'raise', 40, 2, 0.1, 3),
         (2, 'A3o', 'fold', 0, 0, 0.6, 0),
         (2, 'A3o', 'call', 0, 0, 0.4, -1),
         (2, 'A3o', 'raise', 40, 2, 0, -2)

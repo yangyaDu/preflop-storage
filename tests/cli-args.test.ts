@@ -6,6 +6,10 @@ import {
   getBooleanArg,
   getNumberListArg,
   getRepeatedStringArgs,
+  isHelpRequested,
+  assertKnownArgs,
+  getPositiveIntegerArg,
+  getNonNegativeIntegerArg,
 } from "../src/cli/args";
 
 // ─── parseCliArgs ──────────────────────────────────────────────────
@@ -260,5 +264,44 @@ describe("getRepeatedStringArgs", () => {
   it("returns multiple values as an array", () => {
     const args = parseCliArgs(["--dimension", "a", "--dimension", "b", "--dimension", "c"]);
     expect(getRepeatedStringArgs(args, "dimension")).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("isHelpRequested", () => {
+  it("recognizes --help and -h style long key", () => {
+    expect(isHelpRequested(parseCliArgs(["--help"]))).toBe(true);
+    expect(isHelpRequested(parseCliArgs(["--h"]))).toBe(true);
+  });
+
+  it("returns false when help flags are absent", () => {
+    expect(isHelpRequested({})).toBe(false);
+  });
+});
+
+describe("assertKnownArgs", () => {
+  it("accepts allowed argument keys", () => {
+    expect(() => assertKnownArgs(parseCliArgs(["--dir", "out", "--verify-checksum"]), ["dir", "verify-checksum"])).not.toThrow();
+  });
+
+  it("rejects unknown argument keys", () => {
+    expect(() => assertKnownArgs(parseCliArgs(["--wat"]), ["dir"])).toThrow("Unknown argument(s): --wat");
+  });
+});
+
+describe("integer arg helpers", () => {
+  it("parses positive integers", () => {
+    expect(getPositiveIntegerArg(parseCliArgs(["--runs", "2"]), "runs")).toBe(2);
+  });
+
+  it("rejects zero for positive integers", () => {
+    expect(() => getPositiveIntegerArg(parseCliArgs(["--runs", "0"]), "runs")).toThrow("--runs must be a positive integer");
+  });
+
+  it("parses non-negative integers", () => {
+    expect(getNonNegativeIntegerArg(parseCliArgs(["--depth", "0"]), "depth")).toBe(0);
+  });
+
+  it("rejects negative values for non-negative integers", () => {
+    expect(() => getNonNegativeIntegerArg(parseCliArgs(["--depth", "-1"]), "depth")).toThrow("--depth must be a non-negative integer");
   });
 });

@@ -81,3 +81,31 @@ export function getRepeatedStringArgs(args: CliArgs, key: string): string[] {
   if (value === undefined || value === true) return [];
   return Array.isArray(value) ? value : [value];
 }
+
+export function isHelpRequested(args: CliArgs): boolean {
+  return getBooleanArg(args, "help") || getBooleanArg(args, "h");
+}
+
+export function assertKnownArgs(args: CliArgs, allowedKeys: readonly string[]): void {
+  const allowed = new Set(allowedKeys);
+  const unknown = Object.keys(args).filter((key) => !allowed.has(key));
+  if (unknown.length > 0) {
+    throw new Error(`Unknown argument(s): ${unknown.map((key) => `--${key}`).join(", ")}`);
+  }
+}
+
+export function getPositiveIntegerArg(args: CliArgs, key: string, fallback?: number): number {
+  const value = getNumberArg(args, key, fallback);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`--${key} must be a positive integer, got ${value}`);
+  }
+  return value;
+}
+
+export function getNonNegativeIntegerArg(args: CliArgs, key: string, fallback?: number): number {
+  const value = getNumberArg(args, key, fallback);
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`--${key} must be a non-negative integer, got ${value}`);
+  }
+  return value;
+}

@@ -83,7 +83,9 @@ describe("binary codecs", () => {
 
     expect(actions.map((action) => action.actionName)).toEqual(["fold", "raise"]);
     expect(pack.handIds).toEqual([0]);
-    expect(pack.cells[1]).toMatchObject({ exists: true, frequency: expect.closeTo(0.9, 5), handEV: expect.closeTo(1.25, 5) });
+    expect(pack.cells[1]?.exists).toBe(true);
+    expect(pack.cells[1]?.frequency).toBeCloseTo(0.9, 5);
+    expect(pack.cells[1]?.handEV).toBeCloseTo(1.25, 5);
   });
 
   test("decodeRangePackForHand decodes only the target hand", () => {

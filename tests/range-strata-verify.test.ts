@@ -6,6 +6,18 @@ import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { Database } from "bun:sqlite";
 import { buildRangeStrataBinaryStore } from "../src/range-strata-binary/compiler/pipeline";
 import { runStandaloneVerify } from "../src/range-strata-binary/integrity/self-check";
+
+interface ManifestJson {
+  dimensions: Array<Record<string, unknown>>;
+}
+
+interface VerifyReportJson {
+  mode: "standalone" | "cross";
+  totals: {
+    manifestOk: boolean;
+  };
+}
+
 const tempDirs: string[] = [];
 
 afterEach(async () => {
@@ -118,7 +130,7 @@ describe("Range Strata Binary standalone verify", () => {
   test("fails when manifest has duplicate dimensions", async () => {
     const { outDir } = await buildFixture();
     const manifestPath = join(outDir, "manifest.json");
-    const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as ManifestJson;
 
     // Duplicate a dimension
     manifest.dimensions.push({ ...manifest.dimensions[0] });
@@ -231,7 +243,7 @@ describe("Range Strata Binary standalone verify", () => {
     expect(existsSync(outPath)).toBe(true);
     expect(existsSync(mdPath)).toBe(true);
 
-    const jsonContent = JSON.parse(readFileSync(outPath, "utf-8"));
+    const jsonContent = JSON.parse(readFileSync(outPath, "utf-8")) as VerifyReportJson;
     expect(jsonContent.mode).toBe("standalone");
     expect(jsonContent.totals.manifestOk).toBe(true);
 
@@ -264,7 +276,7 @@ describe("Range Strata Binary cross verify", () => {
     expect((report.totals.extraBinaryRecords ?? 0)).toBe(0);
 
     expect(existsSync(outPath)).toBe(true);
-    const jsonContent = JSON.parse(readFileSync(outPath, "utf-8"));
+    const jsonContent = JSON.parse(readFileSync(outPath, "utf-8")) as VerifyReportJson;
     expect(jsonContent.mode).toBe("cross");
   });
 

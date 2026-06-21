@@ -305,19 +305,24 @@ export async function writeWorkloadJson(path: string, workload: BenchmarkWorkloa
 }
 
 export async function readWorkloadJson(path: string): Promise<BenchmarkWorkload> {
-  const raw = JSON.parse(await Bun.file(path).text());
+  const parsed: unknown = JSON.parse(await Bun.file(path).text());
+  const raw = asRecord(parsed, "workload JSON");
   const batchQueriesBySize = new Map<number, BatchBenchmarkItem[]>();
 
-  if (raw.batchQueriesBySize && Array.isArray(raw.batchQueriesBySize)) {
-    for (const [size, queries] of raw.batchQueriesBySize) {
-      batchQueriesBySize.set(Number(size), queries as BatchBenchmarkItem[]);
+  if (Array.isArray(raw.batchQueriesBySize)) {
+    for (const entry of raw.batchQueriesBySize) {
+      if (!Array.isArray(entry) || entry.length !== 2) continue;
+      const [size, queries] = entry as unknown[];
+      if (!Array.isArray(queries)) continue;
+      batchQueriesBySize.set(Number(size), queries.filter(isBatchBenchmarkItem));
     }
   }
 
   // 兼容旧 workload 文件：从 batchQueries/batchSize 回退
-  if (batchQueriesBySize.size === 0 && Array.isArray(raw.batchQueries)) {
+  const batchQueries = Array.isArray(raw.batchQueries) ? raw.batchQueries.filter(isBatchBenchmarkItem) : [];
+  if (batchQueriesBySize.size === 0 && batchQueries.length > 0) {
     const fallbackSize = typeof raw.batchSize === "number" && raw.batchSize > 0 ? raw.batchSize : 20;
-    batchQueriesBySize.set(fallbackSize, raw.batchQueries as BatchBenchmarkItem[]);
+    batchQueriesBySize.set(fallbackSize, batchQueries);
   }
 
   const firstEntry = batchQueriesBySize.entries().next();
@@ -325,14 +330,51 @@ export async function readWorkloadJson(path: string): Promise<BenchmarkWorkload>
   const defaultBatchSize = firstEntry.done ? 20 : firstEntry.value[0];
 
   return {
-    seed: raw.seed,
-    mode: raw.mode ?? "random",
-    dimensions: raw.dimensions ?? [],
-    handQueries: raw.handQueries ?? [],
-    batchQueries: raw.batchQueries ?? defaultBatchQueries,
-    batchSize: raw.batchSize ?? defaultBatchSize,
+    seed: typeof raw.seed === "number" ? raw.seed : 0,
+    mode: raw.mode === "abstract-local" ? "abstract-local" : "random",
+    dimensions: Array.isArray(raw.dimensions) ? raw.dimensions.filter((item): item is string => typeof item === "string") : [],
+    handQueries: Array.isArray(raw.handQueries) ? raw.handQueries.filter(isHandBenchmarkItem) : [],
+    batchQueries: batchQueries.length > 0 ? batchQueries : defaultBatchQueries,
+    batchSize: typeof raw.batchSize === "number" && raw.batchSize > 0 ? raw.batchSize : defaultBatchSize,
     batchQueriesBySize,
   };
+}
+
+function asRecord(value: unknown, label: string): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function isHandBenchmarkItem(value: unknown): value is HandBenchmarkItem {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const item = value as Record<string, unknown>;
+  return (
+    typeof item.strategy === "string" &&
+    typeof item.playerCount === "number" &&
+    typeof item.depthBb === "number" &&
+    typeof item.concreteLineId === "number" &&
+    typeof item.holeCards === "string"
+  );
+}
+
+function isBatchBenchmarkItem(value: unknown): value is BatchBenchmarkItem {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const item = value as Record<string, unknown>;
+  return (
+    typeof item.strategy === "string" &&
+    typeof item.playerCount === "number" &&
+    typeof item.depthBb === "number" &&
+    Array.isArray(item.requests) &&
+    item.requests.every(isBatchRequest)
+  );
+}
+
+function isBatchRequest(value: unknown): value is BatchBenchmarkItem["requests"][number] {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.concreteLineId === "number" && typeof item.holeCards === "string";
 }
 
 export async function writeBenchmarkJson(path: string, report: BenchmarkRunReport): Promise<void> {

@@ -155,6 +155,8 @@ mod tests {
         // action_masks: assume all actions exist (all ones)
         let full_mask: u32 = if action_count == 0 {
             0
+        } else if action_count >= 32 {
+            u32::MAX
         } else {
             (1u32 << action_count) - 1
         };
@@ -205,6 +207,41 @@ mod tests {
         let pack = make_test_pack(&[10], 1, &data);
         let cells = decode_pack_for_hand(&pack, 1, 1, 99);
         assert!(cells.is_empty());
+    }
+
+    #[test]
+    fn test_nan_ev_decodes_to_none() {
+        let data = vec![0.5_f32, f32::NAN, 0.25, 0.0];
+        let pack = make_test_pack(&[0], 2, &data);
+
+        let cells = decode_pack_for_hand(&pack, 1, 2, 0);
+
+        assert_eq!(cells.len(), 2);
+        assert_eq!(cells[0].hand_ev, None);
+        assert_eq!(cells[1].hand_ev, Some(0.0));
+    }
+
+    #[test]
+    fn test_max_pack_layout_decodes() {
+        let hand_ids: Vec<u8> = (0..169).map(|id| id as u8).collect();
+        let action_count = 32;
+        let mut data = Vec::with_capacity(hand_ids.len() * action_count as usize * 2);
+        for _hand_id in &hand_ids {
+            for action_id in 0..action_count {
+                data.push(action_id as f32 / 100.0);
+                data.push(action_id as f32);
+            }
+        }
+        let pack = make_test_pack(&hand_ids, action_count, &data);
+
+        assert_eq!(pack.len(), pack_byte_length(169, action_count) as usize);
+
+        let cells = decode_pack_for_hand(&pack, 169, action_count, 168);
+
+        assert_eq!(cells.len(), action_count as usize);
+        assert_eq!(cells[31].action_id, 31);
+        assert!((cells[31].frequency - 0.31).abs() < 0.001);
+        assert_eq!(cells[31].hand_ev, Some(31.0));
     }
 
     #[test]

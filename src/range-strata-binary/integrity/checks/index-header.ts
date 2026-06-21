@@ -10,8 +10,9 @@ import {
 import type { BuildManifest, BuildManifestDimension } from "../../compiler/types";
 import { dimensionKey } from "../../catalog/naming";
 import type { VerifyCheckResult, VerifyFailure } from "../report";
+import { HANDS_169 } from "../../../hand/hand-dict";
 
-const MAX_HAND_ID = 169;
+const MAX_HAND_COUNT = HANDS_169.length;
 
 export function checkIndexHeader(dir: string, manifest: BuildManifest, validActionSchemaIds: Set<number>): VerifyCheckResult {
   const failures: VerifyFailure[] = [];
@@ -151,12 +152,12 @@ function validateIdxFile(
     prevConcreteLineId = rec.concreteLineId;
 
     // handCount bounds
-    if (rec.handCount < 0 || rec.handCount > MAX_HAND_ID) {
+    if (rec.handCount < 0 || rec.handCount > MAX_HAND_COUNT) {
       failures.push({
         layer: "index-header",
         check: `dimension:${dimKey}`,
         reason: "INVALID_HAND_COUNT",
-        message: `.idx record concreteLineId=${rec.concreteLineId}: handCount=${rec.handCount} out of range [0, ${MAX_HAND_ID}]`,
+        message: `.idx record concreteLineId=${rec.concreteLineId}: handCount=${rec.handCount} out of range [0, ${MAX_HAND_COUNT}]`,
       });
     }
 

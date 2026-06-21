@@ -1,7 +1,10 @@
 import {
+  assertKnownArgs,
   getBooleanArg,
-  getNumberArg,
+  getNonNegativeIntegerArg,
+  getPositiveIntegerArg,
   getStringArg,
+  isHelpRequested,
   parseCliArgs,
 } from "../../cli/args";
 import { runStandaloneVerify } from "../integrity/self-check";
@@ -16,12 +19,41 @@ function parseMode(value: string): VerifyMode {
 
 const args = parseCliArgs(Bun.argv.slice(2));
 
+if (isHelpRequested(args)) {
+  console.log(`Usage: bun run verify [options]
+
+Options:
+  --mode <standalone|cross>   Verification mode (default: standalone)
+  --dir <path>                Range Strata Binary output directory (default: range-db/range-strata-binary)
+  --source <path>             Source SQLite DB path (required for --mode cross)
+  --verify-checksum           Verify pack CRC32C checksums
+  --sample-size <n>           Cross-check sample size; 0 means full scan (default: 10000 in cross mode)
+  --max-failures <n>          Stop cross-check after this many failures (default: 50)
+  --out <path>                JSON report path
+  --md <path>                 Markdown report path
+  --help, --h                 Show this help`);
+  process.exit(0);
+}
+
+assertKnownArgs(args, [
+  "mode",
+  "dir",
+  "source",
+  "verify-checksum",
+  "sample-size",
+  "max-failures",
+  "out",
+  "md",
+  "help",
+  "h",
+]);
+
 const mode = parseMode(getStringArg(args, "mode", "standalone"));
 const dir = getStringArg(args, "dir", "range-db/range-strata-binary");
-const sourceDbPath = mode === "cross" ? getStringArg(args, "source", "range-db/range.db") : undefined;
+const sourceDbPath = mode === "cross" ? getStringArg(args, "source") : undefined;
 const verifyChecksums = getBooleanArg(args, "verify-checksum");
-const sampleSize = getNumberArg(args, "sample-size", mode === "cross" ? 10000 : 0);
-const maxFailures = getNumberArg(args, "max-failures", 50);
+const sampleSize = getNonNegativeIntegerArg(args, "sample-size", mode === "cross" ? 10000 : 0);
+const maxFailures = getPositiveIntegerArg(args, "max-failures", 50);
 
 const outPath = getStringArg(
   args,

@@ -144,7 +144,8 @@ function validateDimensions(value: unknown, issues: BuildManifestValidationIssue
     return [];
   }
 
-  if (value.length === 0) {
+  const items: unknown[] = value;
+  if (items.length === 0) {
     issues.push({
       check: "dimensions",
       reason: "EMPTY",
@@ -154,8 +155,8 @@ function validateDimensions(value: unknown, issues: BuildManifestValidationIssue
   }
 
   const dimensions: BuildManifestDimension[] = [];
-  for (let index = 0; index < value.length; index++) {
-    const rawDimension = value[index];
+  for (let index = 0; index < items.length; index++) {
+    const rawDimension = items[index];
     if (!isRecord(rawDimension)) {
       issues.push({
         check: `dimensions[${index}]`,
@@ -232,7 +233,8 @@ function validateFiles(value: unknown, issues: BuildManifestValidationIssue[]): 
     return [];
   }
 
-  if (value.length === 0) {
+  const items: unknown[] = value;
+  if (items.length === 0) {
     issues.push({
       check: "files",
       reason: "EMPTY",
@@ -242,8 +244,8 @@ function validateFiles(value: unknown, issues: BuildManifestValidationIssue[]): 
   }
 
   const files: string[] = [];
-  for (let index = 0; index < value.length; index++) {
-    const file = value[index];
+  for (let index = 0; index < items.length; index++) {
+    const file = items[index];
     if (typeof file !== "string") {
       issues.push({
         check: `files[${index}]`,
