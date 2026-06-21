@@ -21,6 +21,12 @@ use crate::idx_reader::IdxReader;
 use crate::pack_codec::{action_count_from_pack, decode_pack_for_hand, pack_byte_length};
 use crate::types::{BatchQueryRequest, DecodedCellResult, IdxRecord, PackDecodeResult};
 
+const PFS_BIN_FILE_NOT_FOUND: &str = "PFS_BIN_FILE_NOT_FOUND";
+const PFS_CHECKSUM_MISMATCH: &str = "PFS_CHECKSUM_MISMATCH";
+const PFS_INVALID_FORMAT: &str = "PFS_INVALID_FORMAT";
+const PFS_IO_ERROR: &str = "PFS_IO_ERROR";
+const PFS_UNSUPPORTED_DATA_VERSION: &str = "PFS_UNSUPPORTED_DATA_VERSION";
+
 /// A dimension handle that combines .idx and .bin file access.
 ///
 /// On construction, both files are mmap'd and validated. All query methods
@@ -67,7 +73,8 @@ impl DimensionHandle {
         verify_checksum: Option<bool>,
     ) -> napi::Result<Option<PackDecodeResult>> {
         let verify = verify_checksum.unwrap_or(false);
-        self.query_inner(concrete_line_id, hand_id as u8, verify)
+        let hand_id = validate_hand_id(hand_id)?;
+        self.query_inner(concrete_line_id, hand_id, verify)
     }
 
     /// Batch query multiple (concreteLineId, handId) pairs.
@@ -84,7 +91,10 @@ impl DimensionHandle {
         let verify = verify_checksum.unwrap_or(false);
         requests
             .into_iter()
-            .map(|req| self.query_inner(req.concrete_line_id, req.hand_id as u8, verify))
+            .map(|req| {
+                let hand_id = validate_hand_id(req.hand_id)?;
+                self.query_inner(req.concrete_line_id, hand_id, verify)
+            })
             .collect()
     }
 
@@ -131,7 +141,8 @@ impl DimensionHandle {
         let mut hit_count: u32 = 0;
 
         for req in &requests {
-            match self.query_inner(req.concrete_line_id, req.hand_id as u8, verify)? {
+            let hand_id = validate_hand_id(req.hand_id)?;
+            match self.query_inner(req.concrete_line_id, hand_id, verify)? {
                 Some(result) => {
                     let cc = result.cells.len() as u16;
                     metas.push((cc, result.action_schema_id));
@@ -199,7 +210,8 @@ impl DimensionHandle {
         requests
             .into_iter()
             .map(|req| {
-                self.query_inner(req.concrete_line_id, req.hand_id as u8, verify)
+                let hand_id = validate_hand_id(req.hand_id)?;
+                self.query_inner(req.concrete_line_id, hand_id, verify)
                     .map(|result| result.map(|result| result.cells.len() as u32))
             })
             .collect()
@@ -282,26 +294,184 @@ impl DimensionHandle {
 fn native_open_error(kind: &str, path: &str, error: io::Error) -> napi::Error {
     let message = error.to_string();
     let code = match error.kind() {
-        io::ErrorKind::NotFound => "PFS_BIN_FILE_NOT_FOUND",
+        io::ErrorKind::NotFound => PFS_BIN_FILE_NOT_FOUND,
         io::ErrorKind::InvalidData
             if message.contains("Unsupported") && message.contains("version") =>
         {
-            "PFS_UNSUPPORTED_DATA_VERSION"
+            PFS_UNSUPPORTED_DATA_VERSION
         }
-        io::ErrorKind::InvalidData => "PFS_INVALID_FORMAT",
-        _ => "PFS_IO_ERROR",
+        io::ErrorKind::InvalidData => PFS_INVALID_FORMAT,
+        _ => PFS_IO_ERROR,
     };
 
-    napi::Error::from_reason(format!(
-        "{}: Failed to open {} file '{}': {}",
-        code, kind, path, message
-    ))
+    native_prefixed_error(
+        code,
+        format!("Failed to open {} file '{}': {}", kind, path, message),
+    )
 }
 
 fn native_invalid_format(message: String) -> napi::Error {
-    napi::Error::from_reason(format!("PFS_INVALID_FORMAT: {}", message))
+    native_prefixed_error(PFS_INVALID_FORMAT, message)
 }
 
 fn native_checksum_mismatch(message: String) -> napi::Error {
-    napi::Error::from_reason(format!("PFS_CHECKSUM_MISMATCH: {}", message))
+    native_prefixed_error(PFS_CHECKSUM_MISMATCH, message)
+}
+
+fn native_prefixed_error(code: &str, message: impl Into<String>) -> napi::Error {
+    napi::Error::from_reason(format!("{}: {}", code, message.into()))
+}
+
+fn validate_hand_id(hand_id: u32) -> napi::Result<u8> {
+    if hand_id <= 168 {
+        return Ok(hand_id as u8);
+    }
+
+    Err(native_invalid_format(format!(
+        "Invalid hand_id: {}, expected 0..=168",
+        hand_id
+    )))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+
+    use super::{
+        native_checksum_mismatch, native_invalid_format, native_open_error, native_prefixed_error,
+        validate_hand_id, PFS_BIN_FILE_NOT_FOUND, PFS_CHECKSUM_MISMATCH, PFS_INVALID_FORMAT,
+        PFS_IO_ERROR, PFS_UNSUPPORTED_DATA_VERSION,
+    };
+
+    #[test]
+    fn validate_hand_id_accepts_valid_range() {
+        assert_eq!(validate_hand_id(0).unwrap(), 0);
+        assert_eq!(validate_hand_id(168).unwrap(), 168);
+    }
+
+    #[test]
+    fn validate_hand_id_rejects_out_of_range_values() {
+        let err = validate_hand_id(169).unwrap_err();
+        assert!(err.to_string().contains("PFS_INVALID_FORMAT"));
+        assert!(err.to_string().contains("Invalid hand_id: 169"));
+
+        let err = validate_hand_id(256).unwrap_err();
+        assert!(err.to_string().contains("Invalid hand_id: 256"));
+    }
+
+    #[test]
+    fn native_prefixed_error_formats_code_colon_message() {
+        let err = native_prefixed_error(PFS_INVALID_FORMAT, "bad header");
+        assert_eq!(err.reason, "PFS_INVALID_FORMAT: bad header");
+        assert_eq!(
+            err.to_string(),
+            "GenericFailure, PFS_INVALID_FORMAT: bad header"
+        );
+    }
+
+    #[test]
+    fn native_specific_errors_keep_stable_prefixes() {
+        let invalid = native_invalid_format("bad record".to_string());
+        assert_eq!(
+            invalid.reason,
+            format!("{}: bad record", PFS_INVALID_FORMAT)
+        );
+        assert_eq!(
+            invalid.to_string(),
+            format!("GenericFailure, {}: bad record", PFS_INVALID_FORMAT)
+        );
+
+        let checksum = native_checksum_mismatch("crc mismatch".to_string());
+        assert_eq!(
+            checksum.reason,
+            format!("{}: crc mismatch", PFS_CHECKSUM_MISMATCH)
+        );
+        assert_eq!(
+            checksum.to_string(),
+            format!("GenericFailure, {}: crc mismatch", PFS_CHECKSUM_MISMATCH)
+        );
+    }
+
+    #[test]
+    fn native_open_error_maps_io_kinds_to_stable_prefixes() {
+        let missing = native_open_error(
+            ".bin",
+            "ranges.bin",
+            io::Error::new(io::ErrorKind::NotFound, "missing"),
+        );
+        assert_eq!(
+            missing.reason,
+            format!(
+                "{}: Failed to open .bin file 'ranges.bin': missing",
+                PFS_BIN_FILE_NOT_FOUND
+            )
+        );
+        assert_eq!(
+            missing.to_string(),
+            format!(
+                "GenericFailure, {}: Failed to open .bin file 'ranges.bin': missing",
+                PFS_BIN_FILE_NOT_FOUND
+            )
+        );
+
+        let unsupported = native_open_error(
+            ".idx",
+            "ranges.idx",
+            io::Error::new(io::ErrorKind::InvalidData, "Unsupported .idx version: 2"),
+        );
+        assert_eq!(
+            unsupported.reason,
+            format!(
+                "{}: Failed to open .idx file 'ranges.idx': Unsupported .idx version: 2",
+                PFS_UNSUPPORTED_DATA_VERSION
+            )
+        );
+        assert_eq!(
+            unsupported.to_string(),
+            format!(
+                "GenericFailure, {}: Failed to open .idx file 'ranges.idx': Unsupported .idx version: 2",
+                PFS_UNSUPPORTED_DATA_VERSION
+            )
+        );
+
+        let invalid = native_open_error(
+            ".idx",
+            "ranges.idx",
+            io::Error::new(io::ErrorKind::InvalidData, "Invalid .idx magic"),
+        );
+        assert_eq!(
+            invalid.reason,
+            format!(
+                "{}: Failed to open .idx file 'ranges.idx': Invalid .idx magic",
+                PFS_INVALID_FORMAT
+            )
+        );
+        assert_eq!(
+            invalid.to_string(),
+            format!(
+                "GenericFailure, {}: Failed to open .idx file 'ranges.idx': Invalid .idx magic",
+                PFS_INVALID_FORMAT
+            )
+        );
+
+        let other = native_open_error(
+            ".idx",
+            "ranges.idx",
+            io::Error::new(io::ErrorKind::PermissionDenied, "denied"),
+        );
+        assert_eq!(
+            other.reason,
+            format!(
+                "{}: Failed to open .idx file 'ranges.idx': denied",
+                PFS_IO_ERROR
+            )
+        );
+        assert_eq!(
+            other.to_string(),
+            format!(
+                "GenericFailure, {}: Failed to open .idx file 'ranges.idx': denied",
+                PFS_IO_ERROR
+            )
+        );
+    }
 }

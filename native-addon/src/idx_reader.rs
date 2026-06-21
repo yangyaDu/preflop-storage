@@ -36,7 +36,18 @@ impl IdxReader {
             ));
         }
 
-        // Mmap the entire file
+        // SAFETY: the file is opened read-only, has already been checked to be
+        // at least large enough for the fixed .idx header, and the `File` is
+        // kept alive in `IdxReader` for the full lifetime of the mmap. After
+        // mapping we validate header fields and the declared record area length
+        // before any record-level access.
+        //
+        // This assumes generated index files are immutable while a
+        // `DimensionHandle` is alive. An external process that truncates or
+        // mutates the same file can still invalidate the OS mapping (for
+        // example SIGBUS on Unix); callers should deploy by writing new
+        // versioned directories and swapping handles instead of modifying files
+        // in place.
         let mmap = unsafe { Mmap::map(&file)? };
 
         // Parse & validate header
