@@ -1,21 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { getBinFileName, type RangeDimension } from "../src/db/naming";
 import { getIdxFileName } from "../src/range-strata-binary/catalog/naming";
 import { cleanupPreviousOutput } from "../src/range-strata-binary/compiler/cleanup";
 import type { BuildManifest } from "../src/range-strata-binary/compiler/types";
+import { createTempDirRegistry } from "./helpers/temp-dir";
 
-const tempDirs: string[] = [];
+const tempDirs = createTempDirRegistry();
 
-afterEach(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop();
-    if (dir) await rm(dir, { recursive: true, force: true });
-  }
-});
+afterEach(tempDirs.cleanup);
 
 describe("cleanupPreviousOutput", () => {
   test("removes known Range Strata Binary output files and leaves unrelated files", async () => {
@@ -87,8 +82,7 @@ describe("cleanupPreviousOutput", () => {
 });
 
 async function makeTempOutput(prefix: string): Promise<{ rootDir: string; outDir: string }> {
-  const rootDir = await mkdtemp(join(tmpdir(), prefix));
-  tempDirs.push(rootDir);
+  const rootDir = await tempDirs.make(prefix);
   const outDir = join(rootDir, "out");
   await mkdir(outDir, { recursive: true });
   return { rootDir, outDir };

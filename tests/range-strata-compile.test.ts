@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { buildRangeStrataBinaryStore } from "../src/range-strata-binary/compiler/pipeline";
@@ -9,15 +8,16 @@ import { RangeStrataQueryService } from "../src/range-strata-binary/query/servic
 import { decodeFileHeader, assertSupportedHeader, RANGE_FILE_HEADER_SIZE } from "../src/binary/file-header";
 import { decodeIdxHeader, assertIdxHeader } from "../src/range-strata-binary/index/types";
 import { PreflopQueryError } from "../src/query/errors";
+import {
+  createBuiltRangeDbFixture,
+  createRangeDbFixtureInRoot,
+  type RangeDimensionFixture,
+} from "./helpers/range-db-fixture";
+import { createTempDirRegistry } from "./helpers/temp-dir";
 
-const tempDirs: string[] = [];
+const tempDirs = createTempDirRegistry();
 
-afterEach(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop();
-    if (dir) await removeTempDirWithRetry(dir).catch(() => {});
-  }
-});
+afterEach(tempDirs.cleanup);
 
 describe("Range Strata Binary build pipeline", () => {
   test("produces meta.db, .bin, and .idx files", async () => {
@@ -279,40 +279,15 @@ describe("Range Strata Binary build pipeline", () => {
   });
 
   test("build without overwrite rejects when meta.db already exists", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "preflop-storage-range-strata-binary-build-overwrite-"));
-    tempDirs.push(rootDir);
-
-    const sourcePath = join(rootDir, "range.db");
-    const outDir = join(rootDir, "range-strata-binary");
+    const rootDir = await tempDirs.make("preflop-storage-range-strata-binary-build-overwrite-");
+    const { sourcePath, outDir } = await createRangeDbFixtureInRoot(rootDir, {
+      dimensions: [{ playerCount: 6, depthBb: 100, concreteLines: [], rangeRows: [] }],
+    });
     await mkdir(outDir, { recursive: true });
     // Create a valid SQLite meta.db to simulate pre-existing output
     const dummyDb = new Database(join(outDir, "meta.db"));
     dummyDb.exec("CREATE TABLE build_info(key TEXT PRIMARY KEY, value TEXT)");
     dummyDb.close();
-
-    const sourceDb = new Database(sourcePath);
-    try {
-      sourceDb.exec(`
-        CREATE TABLE concrete_lines_default_6max_100BB (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          abstract_line TEXT NOT NULL, concrete_line TEXT NOT NULL,
-          UNIQUE(abstract_line, concrete_line)
-        );
-        CREATE TABLE drill_scenario_lines_default (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          drill_name TEXT NOT NULL, abstract_line TEXT NOT NULL,
-          player_count INTEGER NOT NULL, depth INTEGER NOT NULL
-        );
-        CREATE TABLE range_data_default_6max_100BB (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          concrete_line_id INTEGER NOT NULL, hole_cards TEXT NOT NULL,
-          action_name TEXT NOT NULL, action_size REAL NOT NULL,
-          amount_bb REAL NOT NULL, frequency REAL NOT NULL, hand_ev REAL
-        );
-      `);
-    } finally {
-      sourceDb.close();
-    }
 
     await expect(
       buildRangeStrataBinaryStore({ sourceDbPath: sourcePath, outDir, overwrite: false }),
@@ -320,10 +295,9 @@ describe("Range Strata Binary build pipeline", () => {
   });
 
   test("multi-dimensional build produces correct files", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "preflop-storage-range-strata-binary-build-"));
-    tempDirs.push(rootDir);
+    const rootDir = await tempDirs.make("preflop-storage-range-strata-binary-build-");
 
-    const { sourcePath, outDir } = createTwoDimensionSource(rootDir);
+    const { sourcePath, outDir } = await createTwoDimensionSource(rootDir);
 
     await buildRangeStrataBinaryStore({ sourceDbPath: sourcePath, outDir, overwrite: true });
 
@@ -332,10 +306,9 @@ describe("Range Strata Binary build pipeline", () => {
   });
 
   test("resume skips successful dimensions and rebuilds failed dimensions", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "preflop-storage-range-strata-binary-resume-"));
-    tempDirs.push(rootDir);
+    const rootDir = await tempDirs.make("preflop-storage-range-strata-binary-resume-");
 
-    const { sourcePath, outDir } = createTwoDimensionSource(rootDir);
+    const { sourcePath, outDir } = await createTwoDimensionSource(rootDir);
     const firstReport = await buildRangeStrataBinaryStore({ sourceDbPath: sourcePath, outDir, overwrite: true });
 
     expect(firstReport.totals.errorCount).toBe(0);
@@ -370,10 +343,9 @@ describe("Range Strata Binary build pipeline", () => {
   });
 
   test("resume rejects when source DB checksum changed", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "preflop-storage-range-strata-binary-resume-checksum-"));
-    tempDirs.push(rootDir);
+    const rootDir = await tempDirs.make("preflop-storage-range-strata-binary-resume-checksum-");
 
-    const { sourcePath, outDir } = createTwoDimensionSource(rootDir);
+    const { sourcePath, outDir } = await createTwoDimensionSource(rootDir);
     await buildRangeStrataBinaryStore({ sourceDbPath: sourcePath, outDir, overwrite: true });
 
     const db = new Database(sourcePath);
@@ -389,10 +361,9 @@ describe("Range Strata Binary build pipeline", () => {
   });
 
   test("overwrite removes files listed by the previous manifest", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "preflop-storage-range-strata-binary-overwrite-clean-"));
-    tempDirs.push(rootDir);
+    const rootDir = await tempDirs.make("preflop-storage-range-strata-binary-overwrite-clean-");
 
-    const { sourcePath, outDir } = createTwoDimensionSource(rootDir);
+    const { sourcePath, outDir } = await createTwoDimensionSource(rootDir);
     await buildRangeStrataBinaryStore({ sourceDbPath: sourcePath, outDir, overwrite: true });
 
     const removedBinPath = join(outDir, "ranges_default_6max_200BB.bin");
@@ -440,145 +411,48 @@ describe("Range Strata Binary build pipeline", () => {
   });
 });
 
-function createTwoDimensionSource(
+async function createTwoDimensionSource(
   rootDir: string,
   options: { secondActionName?: string } = {},
-): { sourcePath: string; outDir: string } {
-  const sourcePath = join(rootDir, "range.db");
-  const outDir = join(rootDir, "range-strata-binary");
+): Promise<{ sourcePath: string; outDir: string }> {
   const secondActionName = options.secondActionName ?? "raise";
-  const db = new Database(sourcePath);
-
-  try {
-    db.exec(`
-      CREATE TABLE concrete_lines_default_6max_100BB (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        abstract_line TEXT NOT NULL,
-        concrete_line TEXT NOT NULL,
-        UNIQUE(abstract_line, concrete_line)
-      );
-      CREATE TABLE concrete_lines_default_6max_200BB (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        abstract_line TEXT NOT NULL,
-        concrete_line TEXT NOT NULL,
-        UNIQUE(abstract_line, concrete_line)
-      );
-      CREATE TABLE drill_scenario_lines_default (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        drill_name TEXT NOT NULL,
-        abstract_line TEXT NOT NULL,
-        player_count INTEGER NOT NULL,
-        depth INTEGER NOT NULL
-      );
-      CREATE TABLE range_data_default_6max_100BB (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        concrete_line_id INTEGER NOT NULL,
-        hole_cards TEXT NOT NULL,
-        action_name TEXT NOT NULL,
-        action_size REAL NOT NULL,
-        amount_bb REAL NOT NULL,
-        frequency REAL NOT NULL,
-        hand_ev REAL
-      );
-      CREATE TABLE range_data_default_6max_200BB (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        concrete_line_id INTEGER NOT NULL,
-        hole_cards TEXT NOT NULL,
-        action_name TEXT NOT NULL,
-        action_size REAL NOT NULL,
-        amount_bb REAL NOT NULL,
-        frequency REAL NOT NULL,
-        hand_ev REAL
-      );
-    `);
-
-    db.query("INSERT INTO concrete_lines_default_6max_100BB(id, abstract_line, concrete_line) VALUES (1, 'R-C', 'R2-C')").run();
-    db.query("INSERT INTO concrete_lines_default_6max_200BB(id, abstract_line, concrete_line) VALUES (1, 'R-C', 'R2-C')").run();
-    db.query("INSERT INTO drill_scenario_lines_default(drill_name, abstract_line, player_count, depth) VALUES ('fixture', 'R-C', 6, 0)").run();
-    db.query("INSERT INTO range_data_default_6max_100BB(concrete_line_id, hole_cards, action_name, action_size, amount_bb, frequency, hand_ev) VALUES (1, 'AA', 'fold', 0, 0, 1, 0)").run();
-    db.query(`
-      INSERT INTO range_data_default_6max_200BB(
-        concrete_line_id, hole_cards, action_name, action_size, amount_bb, frequency, hand_ev
-      )
-      VALUES (1, 'KK', ?, 40, 2, 1, 10)
-    `).run(secondActionName);
-  } finally {
-    db.close();
-  }
-
+  const { sourcePath, outDir } = await createRangeDbFixtureInRoot(rootDir, {
+    dimensions: [
+      {
+        playerCount: 6,
+        depthBb: 100,
+        concreteLines: [{ id: 1, abstractLine: "R-C", concreteLine: "R2-C" }],
+        rangeRows: [
+          { concreteLineId: 1, holeCards: "AA", actionName: "fold", actionSize: 0, amountBb: 0, frequency: 1, handEv: 0 },
+        ],
+      },
+      {
+        playerCount: 6,
+        depthBb: 200,
+        concreteLines: [{ id: 1, abstractLine: "R-C", concreteLine: "R2-C" }],
+        rangeRows: [
+          {
+            concreteLineId: 1,
+            holeCards: "KK",
+            actionName: secondActionName,
+            actionSize: 40,
+            amountBb: 2,
+            frequency: 1,
+            handEv: 10,
+          },
+        ],
+      },
+    ],
+  });
   return { sourcePath, outDir };
 }
 
 async function buildFixture(): Promise<{ outDir: string; sourcePath: string }> {
-  const rootDir = await mkdtemp(join(tmpdir(), "preflop-storage-range-strata-binary-build-"));
-  tempDirs.push(rootDir);
-
-  const sourcePath = join(rootDir, "range.db");
-  const outDir = join(rootDir, "range-strata-binary");
-  const db = new Database(sourcePath);
-
-  try {
-    db.exec(`
-      CREATE TABLE concrete_lines_default_6max_100BB (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        abstract_line TEXT NOT NULL,
-        concrete_line TEXT NOT NULL,
-        UNIQUE(abstract_line, concrete_line)
-      );
-
-      CREATE TABLE drill_scenario_lines_default (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        drill_name TEXT NOT NULL,
-        abstract_line TEXT NOT NULL,
-        player_count INTEGER NOT NULL,
-        depth INTEGER NOT NULL
-      );
-
-      CREATE TABLE range_data_default_6max_100BB (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        concrete_line_id INTEGER NOT NULL,
-        hole_cards TEXT NOT NULL,
-        action_name TEXT NOT NULL,
-        action_size REAL NOT NULL,
-        amount_bb REAL NOT NULL,
-        frequency REAL NOT NULL,
-        hand_ev REAL
-      );
-    `);
-
-    db.query(`
-      INSERT INTO concrete_lines_default_6max_100BB(id, abstract_line, concrete_line)
-      VALUES
-        (1, 'R-C', 'R2-C'),
-        (2, 'R-C', 'R3.5-C')
-    `).run();
-    db.query(`
-      INSERT INTO drill_scenario_lines_default(drill_name, abstract_line, player_count, depth)
-      VALUES ('fixture', 'R-C', 6, 0)
-    `).run();
-    db.query(`
-      INSERT INTO range_data_default_6max_100BB(
-        concrete_line_id, hole_cards, action_name, action_size, amount_bb, frequency, hand_ev
-      )
-      VALUES
-        (1, 'AA', 'fold', 0, 0, 0.1, 0),
-        (1, 'AA', 'call', 0, 0, 0.2, 1),
-        (1, 'AA', 'raise', 40, 2, 0.7, 2),
-        (2, 'A3o', 'fold', 0, 0, 0.6, 0),
-        (2, 'A3o', 'call', 0, 0, 0.4, -1),
-        (2, 'A3o', 'raise', 40, 2, 0, -2)
-    `).run();
-  } finally {
-    db.close();
-  }
-
-  await buildRangeStrataBinaryStore({
-    sourceDbPath: sourcePath,
-    outDir,
-    overwrite: true,
+  return createBuiltRangeDbFixture({
+    tempDirs,
+    prefix: "preflop-storage-range-strata-binary-build-",
+    spec: { dimensions: [compileDimension] },
   });
-
-  return { outDir, sourcePath };
 }
 
 async function mutateFile(path: string, mutate: (bytes: Uint8Array) => void): Promise<void> {
@@ -599,16 +473,19 @@ function expectSyncQueryErrorCode(fn: () => unknown, code: PreflopQueryError["co
   expect((caught as PreflopQueryError).code).toBe(code);
 }
 
-async function removeTempDirWithRetry(dir: string): Promise<void> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      await rm(dir, { recursive: true, force: true });
-      return;
-    } catch (error) {
-      lastError = error;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  }
-  throw lastError;
-}
+const compileDimension: RangeDimensionFixture = {
+  playerCount: 6,
+  depthBb: 100,
+  concreteLines: [
+    { id: 1, abstractLine: "R-C", concreteLine: "R2-C" },
+    { id: 2, abstractLine: "R-C", concreteLine: "R3.5-C" },
+  ],
+  rangeRows: [
+    { concreteLineId: 1, holeCards: "AA", actionName: "fold", actionSize: 0, amountBb: 0, frequency: 0.1, handEv: 0 },
+    { concreteLineId: 1, holeCards: "AA", actionName: "call", actionSize: 0, amountBb: 0, frequency: 0.2, handEv: 1 },
+    { concreteLineId: 1, holeCards: "AA", actionName: "raise", actionSize: 40, amountBb: 2, frequency: 0.7, handEv: 2 },
+    { concreteLineId: 2, holeCards: "A3o", actionName: "fold", actionSize: 0, amountBb: 0, frequency: 0.6, handEv: 0 },
+    { concreteLineId: 2, holeCards: "A3o", actionName: "call", actionSize: 0, amountBb: 0, frequency: 0.4, handEv: -1 },
+    { concreteLineId: 2, holeCards: "A3o", actionName: "raise", actionSize: 40, amountBb: 2, frequency: 0, handEv: -2 },
+  ],
+};

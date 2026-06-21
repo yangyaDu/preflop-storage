@@ -1,147 +1,32 @@
 import { Database } from "bun:sqlite";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { mkdir, open, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { formatBytes, markdownTable } from "../../analysis/format";
+import { join } from "node:path";
 import { getBooleanArg, getNumberArg, getRepeatedStringArgs, getStringArg, parseCliArgs } from "../../cli/args";
 import { dimensionKey, quoteIdentifier } from "../../db/naming";
 import { parseRequestedDimension, type MemorySnapshot } from "../../benchmark/common";
 import { formatBuildManifestIssues, parseBuildManifestJson } from "../compiler/manifest";
 import type { BuildManifest, BuildManifestDimension } from "../compiler/types";
-
-type ColdStartMode = "process-cold" | "os-best-effort" | "linux-drop-cache";
-type QueryPolicy = "first" | "fixed";
-
-interface DimensionQuery {
-  strategy: string;
-  playerCount: number;
-  depthBb: number;
-  concreteLineId: number;
-  hand: string;
-}
-
-interface WorkerResult {
-  ok: boolean;
-  storeOpenAndFirstQueryMs: number;
-  resultCount: number;
-  memoryBefore: MemorySnapshot;
-  memoryAfter: MemorySnapshot;
-  timings: ColdWorkerTimings;
-  error: string | null;
-}
-
-interface ColdStartRunResult extends WorkerResult {
-  runIndex: number;
-  processElapsedMs: number;
-  processOverheadMs: number;
-  eviction: EvictionResult;
-  stderr: string;
-  exitCode: number;
-  validJson: boolean;
-  phaseAccounting: PhaseAccounting;
-}
-
-interface EvictionResult {
-  requested: boolean;
-  method: ColdStartMode;
-  succeeded: boolean;
-  durationMs: number;
-  fillerSizeBytes: number;
-  datasetSizeBytes: number;
-  notes: string[];
-}
-
-interface LatencySummary {
-  minMs: number;
-  p50Ms: number;
-  p95Ms: number;
-  maxMs: number;
-  avgMs: number;
-}
-
-interface PhaseAccounting {
-  phaseSumMs: number;
-  workerTotalMs: number;
-  unaccountedMs: number;
-  unaccountedRatio: number;
-}
-
-interface ColdStartRunFailure {
-  runIndex: number;
-  exitCode: number;
-  error: string;
-  stderr: string;
-  validJson: boolean;
-}
-
-interface ColdWorkerTimings {
-  supportModuleImportMs: number;
-  argsParseMs: number;
-  queryServiceImportMs: number;
-  memorySnapshotMs: number;
-  serviceConstructorMs: number;
-  dimensionPrewarmMs: number;
-  firstQueryMs: number;
-  closeMs: number;
-  workerTotalMs: number;
-}
-
-interface ColdStartPhaseSummaries {
-  supportModuleImportMs: LatencySummary;
-  argsParseMs: LatencySummary;
-  queryServiceImportMs: LatencySummary;
-  memorySnapshotMs: LatencySummary;
-  serviceConstructorMs: LatencySummary;
-  dimensionPrewarmMs: LatencySummary;
-  firstQueryMs: LatencySummary;
-  closeMs: LatencySummary;
-  workerTotalMs: LatencySummary;
-  processOverheadMs: LatencySummary;
-}
-
-interface DimensionColdStartReport {
-  dimension: string;
-  query: DimensionQuery;
-  runs: number;
-  successCount: number;
-  errorCount: number;
-  resultCount: number;
-  storeOpenAndFirstQueryMs: LatencySummary;
-  processElapsedMs: LatencySummary;
-  phaseTimings: ColdStartPhaseSummaries;
-  memoryDeltaRssBytes: LatencySummary;
-  phaseAccounting: PhaseAccounting;
-  failures: ColdStartRunFailure[];
-  parentRssSamples: number[];
-  results: ColdStartRunResult[];
-}
-
-interface ColdStartBenchmarkReport {
-  generatedAt: string;
-  mode: ColdStartMode;
-  platform: NodeJS.Platform;
-  runsPerDimension: number;
-  sourceDbPath: string;
-  binaryDir: string;
-  metaDbPath: string;
-  verifyChecksums: boolean;
-  cacheFillerSizeBytes: number;
-  dimensions: DimensionColdStartReport[];
-  aggregate: {
-    dimensions: number;
-    runs: number;
-    successfulRuns: number;
-    errorCount: number;
-    storeOpenAndFirstQueryMs: LatencySummary;
-    processElapsedMs: LatencySummary;
-    phaseTimings: ColdStartPhaseSummaries;
-    phaseAccounting: PhaseAccounting;
-    failures: ColdStartRunFailure[];
-    parentRssSamples: number[];
-  };
-  notes: string[];
-}
+import type {
+  ColdStartBenchmarkReport,
+  ColdStartMode,
+  ColdStartRunFailure,
+  ColdStartRunResult,
+  ColdWorkerTimings,
+  DimensionColdStartReport,
+  DimensionQuery,
+  EvictionResult,
+  QueryPolicy,
+  WorkerResult,
+} from "./cold/types";
+import { evictCache } from "./cold/cache-eviction";
+import { buildColdStartNotes, writeColdStartJson, writeColdStartMarkdown } from "./cold/report";
+import {
+  buildDimensionReport,
+  computeAggregatePhaseAccounting,
+  computePhaseAccounting,
+  summarizeLatencies,
+  summarizePhaseTimings,
+} from "./cold/stats";
 
 const args = parseCliArgs(Bun.argv.slice(2));
 const sourceDbPath = getStringArg(args, "source", "range-db/range.db");
@@ -243,7 +128,11 @@ async function runColdStartBenchmark(
       failures: allFailures,
       parentRssSamples,
     },
-    notes: buildNotes(),
+    notes: buildColdStartNotes({
+      queryPolicy,
+      mode,
+      cacheFillerSizeBytes: cacheFillerSizeMb * 1024 * 1024,
+    }),
   };
 }
 
@@ -319,230 +208,6 @@ function parseWorkerResult(stdoutText: string, exitCode: number): WorkerResult &
   }
 
   return { ...parsed, _validJson: true };
-}
-
-async function evictCache(
-  cacheMode: ColdStartMode,
-  fillerSizeBytes: number,
-  datasetSizeBytes: number,
-): Promise<EvictionResult> {
-  if (cacheMode === "process-cold") {
-    return {
-      requested: false,
-      method: cacheMode,
-      succeeded: true,
-      durationMs: 0,
-      fillerSizeBytes: 0,
-      datasetSizeBytes,
-      notes: ["OS page cache eviction was not requested."],
-    };
-  }
-
-  if (cacheMode === "linux-drop-cache") {
-    return evictLinuxDropCaches();
-  }
-
-  return evictBestEffortFileCache(fillerSizeBytes, datasetSizeBytes);
-}
-
-async function evictLinuxDropCaches(): Promise<EvictionResult> {
-  const start = performance.now();
-  if (process.platform !== "linux") {
-    return {
-      requested: true,
-      method: "linux-drop-cache",
-      succeeded: false,
-      durationMs: performance.now() - start,
-      fillerSizeBytes: 0,
-      datasetSizeBytes,
-      notes: ["linux-drop-cache mode is only available on Linux."],
-    };
-  }
-
-  try {
-    await Bun.spawn(["sync"]).exited;
-    await Bun.write("/proc/sys/vm/drop_caches", "3\n");
-    return {
-      requested: true,
-      method: "linux-drop-cache",
-      succeeded: true,
-      durationMs: performance.now() - start,
-      fillerSizeBytes: 0,
-      datasetSizeBytes,
-      notes: ["Wrote 3 to /proc/sys/vm/drop_caches after sync."],
-    };
-  } catch (error) {
-    return {
-      requested: true,
-      method: "linux-drop-cache",
-      succeeded: false,
-      durationMs: performance.now() - start,
-      fillerSizeBytes: 0,
-      datasetSizeBytes,
-      notes: [`Could not drop Linux page cache: ${error instanceof Error ? error.message : String(error)}`],
-    };
-  }
-}
-
-async function evictBestEffortFileCache(fillerSizeBytes: number, datasetSizeBytes: number): Promise<EvictionResult> {
-  const start = performance.now();
-  const fillerPath = join(tmpdir(), `preflop-cold-cache-${process.pid}.bin`);
-  const chunk = new Uint8Array(1024 * 1024);
-  // Fill with deterministic non-zero pattern to avoid OS zero-page dedup
-  for (let i = 0; i < chunk.byteLength; i++) {
-    chunk[i] = (i & 0xFF) ^ 0xAA;
-  }
-
-  try {
-    const writer = await open(fillerPath, "w");
-    try {
-      let written = 0;
-      while (written < fillerSizeBytes) {
-        const length = Math.min(chunk.byteLength, fillerSizeBytes - written);
-        await writer.write(chunk.subarray(0, length), 0, length, written);
-        written += length;
-      }
-    } finally {
-      await writer.close();
-    }
-
-    const reader = await open(fillerPath, "r");
-    try {
-      const readBuffer = Buffer.allocUnsafe(1024 * 1024);
-      let read = 0;
-      while (read < fillerSizeBytes) {
-        const result = await reader.read(readBuffer, 0, readBuffer.length, read);
-        if (result.bytesRead === 0) break;
-        read += result.bytesRead;
-      }
-    } finally {
-      await reader.close();
-    }
-
-    await rm(fillerPath, { force: true });
-    const ratio = datasetSizeBytes > 0 ? fillerSizeBytes / datasetSizeBytes : 0;
-    return {
-      requested: true,
-      method: "os-best-effort",
-      succeeded: true,
-      durationMs: performance.now() - start,
-      fillerSizeBytes,
-      datasetSizeBytes,
-      notes: [
-        `Filled OS file cache with ${formatBytes(fillerSizeBytes)} non-zero filler (filler/dataset = ${ratio.toFixed(1)}x). This is best-effort perturbation and does not guarantee a true cold cache.`,
-      ],
-    };
-  } catch (error) {
-    await rm(fillerPath, { force: true }).catch(() => {});
-    return {
-      requested: true,
-      method: "os-best-effort",
-      succeeded: false,
-      durationMs: performance.now() - start,
-      fillerSizeBytes,
-      datasetSizeBytes,
-      notes: [`Best-effort cache perturbation failed: ${error instanceof Error ? error.message : String(error)}`],
-    };
-  }
-}
-
-function buildDimensionReport(query: DimensionQuery, results: ColdStartRunResult[]): DimensionColdStartReport {
-  const okResults = results.filter((r) => r.ok);
-  const failures: ColdStartRunFailure[] = results
-    .filter((r) => !r.ok)
-    .map((r) => ({
-      runIndex: r.runIndex,
-      exitCode: r.exitCode,
-      error: r.error ?? "Unknown error",
-      stderr: r.stderr,
-      validJson: r.validJson,
-    }));
-
-  return {
-    dimension: dimensionKey(query),
-    query,
-    runs: results.length,
-    successCount: okResults.length,
-    errorCount: results.length - okResults.length,
-    resultCount: results.reduce((total, r) => total + r.resultCount, 0),
-    storeOpenAndFirstQueryMs: summarizeLatencies(okResults.map((r) => r.storeOpenAndFirstQueryMs)),
-    processElapsedMs: summarizeLatencies(okResults.map((r) => r.processElapsedMs)),
-    phaseTimings: summarizePhaseTimings(okResults),
-    memoryDeltaRssBytes: summarizeLatencies(
-      okResults.map((r) => r.memoryAfter.rssBytes - r.memoryBefore.rssBytes),
-    ),
-    phaseAccounting: computeAggregatePhaseAccounting(okResults),
-    failures,
-    parentRssSamples: [],
-    results,
-  };
-}
-
-function summarizePhaseTimings(results: ColdStartRunResult[]): ColdStartPhaseSummaries {
-  return {
-    supportModuleImportMs: summarizeLatencies(results.map((result) => result.timings.supportModuleImportMs)),
-    argsParseMs: summarizeLatencies(results.map((result) => result.timings.argsParseMs)),
-    queryServiceImportMs: summarizeLatencies(results.map((result) => result.timings.queryServiceImportMs)),
-    memorySnapshotMs: summarizeLatencies(results.map((result) => result.timings.memorySnapshotMs)),
-    serviceConstructorMs: summarizeLatencies(results.map((result) => result.timings.serviceConstructorMs)),
-    dimensionPrewarmMs: summarizeLatencies(results.map((result) => result.timings.dimensionPrewarmMs)),
-    firstQueryMs: summarizeLatencies(results.map((result) => result.timings.firstQueryMs)),
-    closeMs: summarizeLatencies(results.map((result) => result.timings.closeMs)),
-    workerTotalMs: summarizeLatencies(results.map((result) => result.timings.workerTotalMs)),
-    processOverheadMs: summarizeLatencies(results.map((result) => result.processOverheadMs)),
-  };
-}
-
-function summarizeLatencies(values: number[]): LatencySummary {
-  if (values.length === 0) {
-    return { minMs: 0, p50Ms: 0, p95Ms: 0, maxMs: 0, avgMs: 0 };
-  }
-
-  const sorted = [...values].sort((left, right) => left - right);
-  const total = values.reduce((sum, value) => sum + value, 0);
-
-  return {
-    minMs: sorted[0],
-    p50Ms: percentile(sorted, 0.5),
-    p95Ms: percentile(sorted, 0.95),
-    maxMs: sorted[sorted.length - 1],
-    avgMs: total / values.length,
-  };
-}
-
-function percentile(sortedValues: number[], quantile: number): number {
-  if (sortedValues.length === 0) return 0;
-  const index = Math.min(sortedValues.length - 1, Math.max(0, Math.ceil(sortedValues.length * quantile) - 1));
-  return sortedValues[index];
-}
-
-function computePhaseAccounting(timings: ColdWorkerTimings): PhaseAccounting {
-  const phaseSumMs =
-    timings.supportModuleImportMs +
-    timings.argsParseMs +
-    timings.queryServiceImportMs +
-    timings.memorySnapshotMs +
-    timings.serviceConstructorMs +
-    timings.dimensionPrewarmMs +
-    timings.firstQueryMs +
-    timings.closeMs;
-  const unaccountedMs = timings.workerTotalMs - phaseSumMs;
-  const unaccountedRatio = timings.workerTotalMs > 0 ? Math.abs(unaccountedMs) / timings.workerTotalMs : 0;
-  return { phaseSumMs, workerTotalMs: timings.workerTotalMs, unaccountedMs, unaccountedRatio };
-}
-
-function computeAggregatePhaseAccounting(results: ColdStartRunResult[]): PhaseAccounting {
-  if (results.length === 0) {
-    return { phaseSumMs: 0, workerTotalMs: 0, unaccountedMs: 0, unaccountedRatio: 0 };
-  }
-  // Take the run with the largest absolute unaccountedMs as the representative
-  let worst = results[0].phaseAccounting;
-  for (let i = 1; i < results.length; i++) {
-    if (Math.abs(results[i].phaseAccounting.unaccountedMs) > Math.abs(worst.unaccountedMs)) {
-      worst = results[i].phaseAccounting;
-    }
-  }
-  return worst;
 }
 
 function computeDatasetSize(dir: string): number {
@@ -660,172 +325,6 @@ function filterRequestedDimensions(
         item.depthBb === dimension.depthBb,
     ),
   );
-}
-
-async function writeColdStartJson(path: string, reportToWrite: ColdStartBenchmarkReport): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await Bun.write(path, `${JSON.stringify(reportToWrite, null, 2)}\n`);
-}
-
-async function writeColdStartMarkdown(path: string, reportToWrite: ColdStartBenchmarkReport): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await Bun.write(path, renderColdStartMarkdown(reportToWrite));
-}
-
-function renderColdStartMarkdown(reportToRender: ColdStartBenchmarkReport): string {
-  const rows = reportToRender.dimensions.map((dimension) => [
-    dimension.dimension,
-    dimension.runs,
-    dimension.errorCount,
-    formatMs(dimension.storeOpenAndFirstQueryMs.p50Ms),
-    formatMs(dimension.storeOpenAndFirstQueryMs.p95Ms),
-    formatMs(dimension.processElapsedMs.p50Ms),
-    formatMs(dimension.processElapsedMs.p95Ms),
-    formatBytes(dimension.memoryDeltaRssBytes.p95Ms),
-    `${dimension.query.concreteLineId} / ${dimension.query.hand}`,
-  ]);
-  const aggregatePhaseRows = phaseSummaryRows(reportToRender.aggregate.phaseTimings);
-  const dimensionPhaseRows = reportToRender.dimensions.map((dimension) => [
-    dimension.dimension,
-    formatMs(dimension.phaseTimings.queryServiceImportMs.p95Ms),
-    formatMs(dimension.phaseTimings.serviceConstructorMs.p95Ms),
-    formatMs(dimension.phaseTimings.dimensionPrewarmMs.p95Ms),
-    formatMs(dimension.phaseTimings.firstQueryMs.p95Ms),
-    formatMs(dimension.phaseTimings.workerTotalMs.p95Ms),
-    formatMs(dimension.phaseTimings.processOverheadMs.p95Ms),
-  ]);
-
-  return `# Range Strata Binary Cold-Start Benchmark
-
-Generated: ${reportToRender.generatedAt}
-
-## Summary
-
-- Mode: ${reportToRender.mode}
-- Platform: ${reportToRender.platform}
-- Source DB: \`${reportToRender.sourceDbPath}\`
-- Binary dir: \`${reportToRender.binaryDir}\`
-- meta.db: \`${reportToRender.metaDbPath}\`
-- Dimensions: ${reportToRender.aggregate.dimensions}
-- Runs per dimension: ${reportToRender.runsPerDimension}
-- Total runs: ${reportToRender.aggregate.runs}
-- Errors: ${reportToRender.aggregate.errorCount}
-- Cache filler size: ${formatBytes(reportToRender.cacheFillerSizeBytes)}
-- Successful runs: ${reportToRender.aggregate.successfulRuns}
-- Aggregate store open + first query p50 / p95: ${formatMs(reportToRender.aggregate.storeOpenAndFirstQueryMs.p50Ms)} / ${formatMs(reportToRender.aggregate.storeOpenAndFirstQueryMs.p95Ms)}
-- Aggregate process elapsed p50 / p95: ${formatMs(reportToRender.aggregate.processElapsedMs.p50Ms)} / ${formatMs(reportToRender.aggregate.processElapsedMs.p95Ms)}
-- Phase accounting (worst): unaccounted ${formatMs(reportToRender.aggregate.phaseAccounting.unaccountedMs)} (${(reportToRender.aggregate.phaseAccounting.unaccountedRatio * 100).toFixed(2)}%)
-
-## Aggregate Phase Breakdown
-
-${markdownTable(["Phase", "P50", "P95", "Avg", "Max"], aggregatePhaseRows)}
-
-## Dimensions
-
-${markdownTable(
-  [
-    "Dimension",
-    "Runs",
-    "Errors",
-    "Store Open+Query P50",
-    "Store Open+Query P95",
-    "Process P50",
-    "Process P95",
-    "RSS Delta P95",
-    "Query",
-  ],
-  rows,
-)}
-
-## Failures
-
-${
-  reportToRender.aggregate.failures.length === 0
-    ? "None\n"
-    : markdownTable(
-        ["Dimension", "Run", "Exit Code", "Valid JSON", "Error"],
-        reportToRender.dimensions.flatMap((dim) =>
-          dim.failures.map((failure) =>
-            [dim.dimension, failure.runIndex, failure.exitCode, failure.validJson, failure.error].map(String),
-          ),
-        ),
-      )
-}
-
-## Dimension Phase Breakdown
-
-${markdownTable(
-  [
-    "Dimension",
-    "QueryService Import P95",
-    "Service Ctor P95",
-    "Dimension Prewarm P95",
-    "First Query P95",
-    "Worker Total P95",
-    "Process Overhead P95",
-  ],
-  dimensionPhaseRows,
-)}
-
-## Notes
-
-${reportToRender.notes.map((note) => `- ${note}`).join("\n")}
-`;
-}
-
-function phaseSummaryRows(summary: ColdStartPhaseSummaries): string[][] {
-  const rows: Array<[string, LatencySummary]> = [
-    ["Support module import", summary.supportModuleImportMs],
-    ["CLI args parse", summary.argsParseMs],
-    ["QueryService/native import", summary.queryServiceImportMs],
-    ["Memory snapshot", summary.memorySnapshotMs],
-    ["Service constructor (meta.db open)", summary.serviceConstructorMs],
-    ["Dimension prewarm (idx/bin mmap + schema preload)", summary.dimensionPrewarmMs],
-    ["First query sync decode", summary.firstQueryMs],
-    ["Service close", summary.closeMs],
-    ["Worker measured total", summary.workerTotalMs],
-    ["Parent process overhead", summary.processOverheadMs],
-  ];
-
-  return rows.map(([name, summaryTimings]) => {
-    return [
-      name,
-      formatMs(summaryTimings.p50Ms),
-      formatMs(summaryTimings.p95Ms),
-      formatMs(summaryTimings.avgMs),
-      formatMs(summaryTimings.maxMs),
-    ];
-  });
-}
-
-function buildNotes(): string[] {
-  const notes = [
-    "Each run starts a fresh Bun worker process and records worker phase timings plus parent-observed process elapsed time.",
-    "Default dimension selection uses all successful dimensions from manifest.json, so a full production output should cover all 9 dimensions.",
-    "storeOpenAndFirstQueryMs = Range Strata Binary store open + dimension prewarm + first query, excluding module/runtime import. Use processElapsedMs or workerTotalMs for end-to-end cold start.",
-    "QueryService/native import includes dynamic import of the Range Strata Binary query service and native addon loading.",
-    "Dimension prewarm includes opening/mmaping the dimension .idx/.bin files and preloading the action schemas referenced by that dimension.",
-    "Parent process overhead is parent-observed process elapsed time minus worker-measured total; it approximates Bun startup/shutdown and IPC overhead.",
-    "Phase accounting records the difference between the sum of individual phase timings and workerTotalMs. A discrepancy > 1ms or ratio > 1% should be investigated.",
-    `Query policy: ${queryPolicy}. Use --query-policy first (default, smoke test) or --query-policy fixed with --concrete-line-id/--hand. Roadmap: round-robin, random, stratified.`,
-  ];
-
-  if (mode === "process-cold") {
-    notes.push("process-cold does not attempt OS page cache eviction; it measures fresh process/open/query cost with whatever cache state the OS currently has.");
-  } else if (mode === "os-best-effort") {
-    notes.push(
-      `os-best-effort writes and reads a ${formatBytes(cacheFillerSizeMb * 1024 * 1024)} non-zero filler file to perturb OS page cache. Succeeded means perturbation completed, NOT that .idx/.bin files were evicted. This is a best-effort cache perturbation, not a guaranteed cold cache.`,
-    );
-  } else {
-    notes.push("linux-drop-cache attempts sync + /proc/sys/vm/drop_caches and requires Linux with sufficient privileges.");
-  }
-
-  return notes;
-}
-
-function formatMs(value: number): string {
-  if (!Number.isFinite(value)) return "unknown";
-  return `${value.toFixed(value >= 10 ? 2 : 3)} ms`;
 }
 
 function parseMode(value: string): ColdStartMode {

@@ -2,17 +2,16 @@ import { Database } from "bun:sqlite";
 import {
   dimensionKey,
   getBinFileName,
-  getConcreteLinesTableName,
   getRangePackIndexTableName,
-  getDrillScenarioTableName,
   quoteIdentifier,
 } from "../../db/naming";
+import {
+  getConcreteLines as readConcreteLines,
+  getDrillScenarioLines as readDrillScenarioLines,
+  type ConcreteLineRow,
+} from "../../db/meta-line-reader";
 
-export interface ConcreteLineRow {
-  concrete_line_id: number;
-  abstract_line: string;
-  concrete_line: string;
-}
+export type { ConcreteLineRow } from "../../db/meta-line-reader";
 
 export interface RangePackIndexRow {
   player_count: number;
@@ -47,21 +46,7 @@ export class MetaDb {
     playerCount: number;
     drillDepth?: number;
   }): string[] {
-    const tableName = quoteIdentifier(getDrillScenarioTableName(params.strategy ?? "default"));
-    const rows = this.db
-      .query(`
-        SELECT abstract_line
-        FROM ${tableName}
-        WHERE drill_name = ?
-          AND player_count = ?
-          AND drill_depth = ?
-        ORDER BY abstract_line
-      `)
-      .all(params.drillName, params.playerCount, params.drillDepth ?? 0) as Array<{
-      abstract_line: string;
-    }>;
-
-    return rows.map((row) => row.abstract_line);
+    return readDrillScenarioLines(this.db, params);
   }
 
   getConcreteLines(params: {
@@ -70,17 +55,7 @@ export class MetaDb {
     depthBb: number;
     abstractLine: string;
   }): ConcreteLineRow[] {
-    const tableName = quoteIdentifier(
-      getConcreteLinesTableName(params.strategy ?? "default", params.playerCount, params.depthBb),
-    );
-    return this.db
-      .query(`
-        SELECT concrete_line_id, abstract_line, concrete_line
-        FROM ${tableName}
-        WHERE abstract_line = ?
-        ORDER BY concrete_line_id
-      `)
-      .all(params.abstractLine) as ConcreteLineRow[];
+    return readConcreteLines(this.db, params);
   }
 
   getRangePackIndex(params: {

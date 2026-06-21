@@ -1,20 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { getBinFileName, type RangeDimension } from "../src/db/naming";
 import { getIdxFileName } from "../src/range-strata-binary/catalog/naming";
 import { resolveBuildPlan } from "../src/range-strata-binary/compiler/plan";
 import type { BuildManifest, BuildManifestDimension, BuildManifestDimensionStatus } from "../src/range-strata-binary/compiler/types";
+import { createTempDirRegistry } from "./helpers/temp-dir";
 
-const tempDirs: string[] = [];
+const tempDirs = createTempDirRegistry();
 
-afterEach(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop();
-    if (dir) await rm(dir, { recursive: true, force: true });
-  }
-});
+afterEach(tempDirs.cleanup);
 
 describe("resolveBuildPlan", () => {
   test("plans a fresh build when meta.db does not exist", async () => {
@@ -153,8 +148,7 @@ describe("resolveBuildPlan", () => {
 });
 
 async function makeTempDir(prefix: string): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), prefix));
-  tempDirs.push(dir);
+  const dir = await tempDirs.make(prefix);
   await mkdir(dir, { recursive: true });
   return dir;
 }

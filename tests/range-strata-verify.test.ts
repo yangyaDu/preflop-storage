@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { Database } from "bun:sqlite";
-import { buildRangeStrataBinaryStore } from "../src/range-strata-binary/compiler/pipeline";
 import { runStandaloneVerify } from "../src/range-strata-binary/integrity/self-check";
+import { createBuiltRangeDbFixtureInRoot, type RangeDimensionFixture } from "./helpers/range-db-fixture";
+import { createTempDirRegistry } from "./helpers/temp-dir";
 
 interface ManifestJson {
   dimensions: Array<Record<string, unknown>>;
@@ -18,70 +18,47 @@ interface VerifyReportJson {
   };
 }
 
-const tempDirs: string[] = [];
+const tempDirs = createTempDirRegistry();
 
-afterEach(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop();
-    if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
-  }
-});
+afterEach(tempDirs.cleanup);
 
 async function buildFixture(
   options: { secondActionName?: string; stats?: boolean } = {},
 ): Promise<{ outDir: string; sourcePath: string }> {
-  const rootDir = await mkdtemp(join(tmpdir(), "pfs-verify-"));
-  tempDirs.push(rootDir);
-
-  const sourcePath = join(rootDir, "range.db");
-  const outDir = join(rootDir, "range-strata-binary");
+  const rootDir = await tempDirs.make("pfs-verify-");
   const secondActionName = options.secondActionName ?? "raise";
-
-  const db = new Database(sourcePath);
-  try {
-    db.exec(`
-      CREATE TABLE concrete_lines_default_6max_100BB (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        abstract_line TEXT NOT NULL, concrete_line TEXT NOT NULL,
-        UNIQUE(abstract_line, concrete_line)
-      );
-      CREATE TABLE drill_scenario_lines_default (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        drill_name TEXT NOT NULL, abstract_line TEXT NOT NULL,
-        player_count INTEGER NOT NULL, depth INTEGER NOT NULL
-      );
-      CREATE TABLE range_data_default_6max_100BB (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        concrete_line_id INTEGER NOT NULL, hole_cards TEXT NOT NULL,
-        action_name TEXT NOT NULL, action_size REAL NOT NULL,
-        amount_bb REAL NOT NULL, frequency REAL NOT NULL, hand_ev REAL
-      );
-    `);
-
-    db.query(
-      "INSERT INTO concrete_lines_default_6max_100BB(id, abstract_line, concrete_line) VALUES (1, 'R-C', 'R2-C'), (2, 'R-C', 'R3-C')",
-    ).run();
-    db.query("INSERT INTO drill_scenario_lines_default(drill_name, abstract_line, player_count, depth) VALUES ('fixture', 'R-C', 6, 0)").run();
-    db.query(
-      "INSERT INTO range_data_default_6max_100BB(concrete_line_id, hole_cards, action_name, action_size, amount_bb, frequency, hand_ev) VALUES (1, 'AA', 'fold', 0, 0, 1, 0)",
-    ).run();
-    db.query(
-      "INSERT INTO range_data_default_6max_100BB(concrete_line_id, hole_cards, action_name, action_size, amount_bb, frequency, hand_ev) VALUES (2, 'AKs', ?, 40, 2, 0.5, 5)",
-    ).run(secondActionName);
-  } finally {
-    db.close();
-  }
-
-  await buildRangeStrataBinaryStore({
-    sourceDbPath: sourcePath,
-    outDir,
-    overwrite: true,
+  const { outDir, sourcePath } = await createBuiltRangeDbFixtureInRoot(rootDir, {
+    dimensions: [verifyDimension(secondActionName)],
+  }, {
     maxConcreteLinesPerDimension: 10,
     statsOutPath: options.stats ? join(rootDir, "reports", "build-stats.json") : undefined,
     statsMdPath: options.stats ? join(rootDir, "reports", "build-stats.md") : undefined,
   });
 
   return { outDir, sourcePath };
+}
+
+function verifyDimension(secondActionName: string): RangeDimensionFixture {
+  return {
+    playerCount: 6,
+    depthBb: 100,
+    concreteLines: [
+      { id: 1, abstractLine: "R-C", concreteLine: "R2-C" },
+      { id: 2, abstractLine: "R-C", concreteLine: "R3-C" },
+    ],
+    rangeRows: [
+      { concreteLineId: 1, holeCards: "AA", actionName: "fold", actionSize: 0, amountBb: 0, frequency: 1, handEv: 0 },
+      {
+        concreteLineId: 2,
+        holeCards: "AKs",
+        actionName: secondActionName,
+        actionSize: 40,
+        amountBb: 2,
+        frequency: 0.5,
+        handEv: 5,
+      },
+    ],
+  };
 }
 
 describe("Range Strata Binary standalone verify", () => {

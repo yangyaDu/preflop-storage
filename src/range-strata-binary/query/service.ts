@@ -1,84 +1,45 @@
 import { Database } from "bun:sqlite";
-import { join } from "node:path";
-import { decodeActionSchema, normalizeActionName, type ActionDef, type ActionName } from "../../binary/action-schema-codec";
-import { assertCrc32c } from "../../binary/crc32c";
-import { RangeBinFileReader } from "../../binary/range-bin-file-reader";
-import { decodeRangePackForHand, decodeRangePackMaskMatch } from "../../binary/range-pack-codec";
-import { getHandCode, getHandId } from "../../hand/hand-dict";
+import { type ActionDef } from "../../binary/action-schema-codec";
+import { getHandId } from "../../hand/hand-dict";
 import {
   PreflopQueryError,
-  PreflopStoreError,
   toPreflopQueryError,
   toPreflopQueryErrorInfo,
   type PreflopQueryErrorInfo,
 } from "../../query/errors";
 import {
-  getBinFileName,
-  getConcreteLinesTableName,
-  getDrillScenarioTableName,
-  quoteIdentifier,
-} from "../../db/naming";
-import { getIdxFileName } from "../catalog/naming";
-import { RangeIdxReader } from "../index/reader";
+  getConcreteLines as readConcreteLines,
+  getDrillScenarioLines as readDrillScenarioLines,
+  type ConcreteLineRow,
+} from "../../db/meta-line-reader";
+import { ActionSchemaCache } from "./action-schema-cache";
+import { getHandsByActionFromStore } from "./action-filter";
+import { DimensionHandlePool } from "./dimension-handle-pool";
+import { parseFlatBatchResult, toBatchFatalErrorResults } from "./flat-batch-result";
+import type {
+  ActionResult,
+  BatchHandStrategyRequest,
+  BatchHandStrategyResult,
+  HandStrategy,
+  RangeStrataQueryServiceOptions,
+} from "./types";
 
 // Rust native addon — replaces RangeIdxReader + RangeBinReader for the hot path.
-import { DimensionHandle, type BatchQueryRequest, type PackDecodeResult } from "../../../native-addon/index.js";
+import { type BatchQueryRequest, type DimensionHandle, type PackDecodeResult } from "../../../native-addon/index.js";
 
-// Flat buffer protocol constants for query_batch_flat
-const FLAT_MAGIC = 0x46425146; // "FQBF"
-const FLAT_CELL_SIZE = 21;
-
-export interface ActionResult {
-  actionName: ActionName;
-  actionSize: number;
-  amountBB: number;
-  frequency: number;
-  handEV: number | null;
-  exists: boolean;
-}
-
-export interface HandStrategy {
-  holeCards: string;
-  exists: boolean;
-  actions: ActionResult[];
-}
-
-export interface BatchHandStrategyRequest {
-  concreteLineId: number;
-  holeCards: string;
-}
-
-export interface BatchHandStrategyResult extends BatchHandStrategyRequest {
-  strategy: HandStrategy | null;
-  error: PreflopQueryErrorInfo | null;
-}
-
-export interface ConcreteLineRow {
-  concrete_line_id: number;
-  abstract_line: string;
-  concrete_line: string;
-}
-
-export interface ActionSchemaRow {
-  id: number;
-  action_count: number;
-  action_blob: Uint8Array;
-  checksum: number;
-}
-
-export interface RangeStrataQueryServiceOptions {
-  verifyChecksums?: boolean;
-  prewarmActionSchemas?: boolean;
-  /** Maximum number of concurrently open DimensionHandle mmaps. Default 3. */
-  maxOpenHandles?: number;
-}
+export type { ConcreteLineRow } from "../../db/meta-line-reader";
+export type {
+  ActionResult,
+  BatchHandStrategyRequest,
+  BatchHandStrategyResult,
+  HandStrategy,
+  RangeStrataQueryServiceOptions,
+} from "./types";
 
 export class RangeStrataQueryService {
   private readonly metaDb: Database;
-  private readonly handles = new Map<string, DimensionHandle>();
-  private readonly actionCache = new Map<number, ActionDef[]>();
-  private readonly handleLRU: string[] = []; // [oldest, ..., newest]
-  private readonly maxOpenHandles: number;
+  private readonly actionSchemas: ActionSchemaCache;
+  private readonly handlePool: DimensionHandlePool;
 
   constructor(
     metaDbPath: string,
@@ -86,7 +47,8 @@ export class RangeStrataQueryService {
     private readonly options: RangeStrataQueryServiceOptions = {},
   ) {
     this.metaDb = new Database(metaDbPath, { readonly: true });
-    this.maxOpenHandles = this.options.maxOpenHandles ?? 3;
+    this.actionSchemas = new ActionSchemaCache(this.metaDb);
+    this.handlePool = new DimensionHandlePool(this.binaryDir, this.options.maxOpenHandles ?? 3);
     if (this.options.prewarmActionSchemas) {
       this.prewarmActionSchemas();
     }
@@ -98,21 +60,7 @@ export class RangeStrataQueryService {
     playerCount: number;
     drillDepth?: number;
   }): string[] {
-    const tableName = quoteIdentifier(getDrillScenarioTableName(params.strategy ?? "default"));
-    const rows = this.metaDb
-      .query(`
-        SELECT abstract_line
-        FROM ${tableName}
-        WHERE drill_name = ?
-          AND player_count = ?
-          AND drill_depth = ?
-        ORDER BY abstract_line
-      `)
-      .all(params.drillName, params.playerCount, params.drillDepth ?? 0) as Array<{
-      abstract_line: string;
-    }>;
-
-    return rows.map((row) => row.abstract_line);
+    return readDrillScenarioLines(this.metaDb, params);
   }
 
   getConcreteLines(params: {
@@ -121,17 +69,7 @@ export class RangeStrataQueryService {
     depthBb: number;
     abstractLine: string;
   }): ConcreteLineRow[] {
-    const tableName = quoteIdentifier(
-      getConcreteLinesTableName(params.strategy ?? "default", params.playerCount, params.depthBb),
-    );
-    return this.metaDb
-      .query(`
-        SELECT concrete_line_id, abstract_line, concrete_line
-        FROM ${tableName}
-        WHERE abstract_line = ?
-        ORDER BY concrete_line_id
-      `)
-      .all(params.abstractLine) as ConcreteLineRow[];
+    return readConcreteLines(this.metaDb, params);
   }
 
   /**
@@ -143,31 +81,8 @@ export class RangeStrataQueryService {
     playerCount: number;
     depthBb: number;
   }): void {
-    const strategy = params.strategy ?? "default";
-    const idxFileName = getIdxFileName(strategy, params.playerCount, params.depthBb);
-    const binFileName = getBinFileName(strategy, params.playerCount, params.depthBb);
-    const key = `${idxFileName}|${binFileName}`;
-
-    if (this.handles.has(key)) {
-      this.touchHandle(key);
-      return;
-    }
-
-    const idxPath = join(this.binaryDir, idxFileName);
-    const binPath = join(this.binaryDir, binFileName);
-
-    try {
-      const handle = new DimensionHandle(idxPath, binPath);
-      this.handles.set(key, handle);
-      this.touchHandle(key);
-      this.evictLRU();
-      this.prewarmActionSchemasForDimension(handle);
-    } catch (error) {
-      throw toPreflopQueryError(error, "BIN_FILE_NOT_FOUND", {
-        idxFileName,
-        binFileName,
-      });
-    }
+    const handle = this.handlePool.prewarm(params);
+    this.prewarmActionSchemasForDimension(handle);
   }
 
   /**
@@ -186,33 +101,7 @@ export class RangeStrataQueryService {
    * 第一次遇到新 schema 时仍会回 meta.db 查询，随机 workload 会被这个成本拖慢。
    */
   prewarmActionSchemas(actionSchemaIds?: Iterable<number>): number {
-    if (actionSchemaIds) {
-      let loaded = 0;
-      for (const actionSchemaId of actionSchemaIds) {
-        if (!this.actionCache.has(actionSchemaId)) {
-          this.getActionSchema(actionSchemaId);
-          loaded += 1;
-        }
-      }
-      return loaded;
-    }
-
-    const rows = this.metaDb
-      .query(`
-        SELECT id, action_count, action_blob
-        FROM action_schemas
-        ORDER BY id
-      `)
-      .all() as ActionSchemaRow[];
-
-    let loaded = 0;
-    for (const row of rows) {
-      if (this.actionCache.has(row.id)) continue;
-      this.actionCache.set(row.id, this.decodeActionSchemaRow(row));
-      loaded += 1;
-    }
-
-    return loaded;
+    return this.actionSchemas.prewarm(actionSchemaIds);
   }
 
   async getHandStrategy(params: {
@@ -223,19 +112,17 @@ export class RangeStrataQueryService {
     holeCards: string;
   }): Promise<HandStrategy | null> {
     const strategy = params.strategy ?? "default";
-    const idxFileName = getIdxFileName(strategy, params.playerCount, params.depthBb);
-    const binFileName = getBinFileName(strategy, params.playerCount, params.depthBb);
-    const key = `${idxFileName}|${binFileName}`;
-    const handle = this.handles.get(key);
+    const handle = this.handlePool.get(params);
 
     if (handle) {
-      this.touchHandle(key);
       return this.queryHandSync(params.holeCards, params.concreteLineId, handle);
     }
 
     // 冷路径：需要打开文件
     try {
-      this.prewarmDimension(params);
+      const newHandle = this.handlePool.prewarm(params);
+      this.prewarmActionSchemasForDimension(newHandle);
+      return this.queryHandSync(params.holeCards, params.concreteLineId, newHandle);
     } catch (error) {
       throw toPreflopQueryError(error, "PACK_NOT_FOUND", {
         strategy,
@@ -244,10 +131,6 @@ export class RangeStrataQueryService {
         concreteLineId: params.concreteLineId,
       });
     }
-
-    const newHandle = this.handles.get(key);
-    if (!newHandle) return null;
-    return this.queryHandSync(params.holeCards, params.concreteLineId, newHandle);
   }
 
   /**
@@ -260,20 +143,7 @@ export class RangeStrataQueryService {
     concreteLineId: number;
     holeCards: string;
   }): HandStrategy | null {
-    const strategy = params.strategy ?? "default";
-    const idxFileName = getIdxFileName(strategy, params.playerCount, params.depthBb);
-    const binFileName = getBinFileName(strategy, params.playerCount, params.depthBb);
-    const key = `${idxFileName}|${binFileName}`;
-    const handle = this.handles.get(key);
-
-    if (!handle) {
-      throw new PreflopQueryError("BIN_FILE_NOT_FOUND", `Dimension handle not cached. Call prewarmDimension() first.`, {
-        idxFileName,
-        binFileName,
-      });
-    }
-
-    this.touchHandle(key);
+    const handle = this.handlePool.require(params);
     return this.queryHandSync(params.holeCards, params.concreteLineId, handle);
   }
 
@@ -292,10 +162,7 @@ export class RangeStrataQueryService {
     let handle: DimensionHandle;
     try {
       this.prewarmDimension({ strategy, playerCount, depthBb });
-      const idxFileName = getIdxFileName(strategy, playerCount, depthBb);
-      const binFileName = getBinFileName(strategy, playerCount, depthBb);
-      const key = `${idxFileName}|${binFileName}`;
-      handle = this.handles.get(key)!;
+      handle = this.handlePool.require({ strategy, playerCount, depthBb });
     } catch (error) {
       return params.requests.map((request) => ({
         ...request,
@@ -323,19 +190,7 @@ export class RangeStrataQueryService {
     if (params.requests.length === 0) return [];
 
     const strategy = params.strategy ?? "default";
-    const idxFileName = getIdxFileName(strategy, params.playerCount, params.depthBb);
-    const binFileName = getBinFileName(strategy, params.playerCount, params.depthBb);
-    const key = `${idxFileName}|${binFileName}`;
-    const handle = this.handles.get(key);
-
-    if (!handle) {
-      throw new PreflopQueryError("BIN_FILE_NOT_FOUND", `Dimension handle not cached. Call prewarmDimension() first.`, {
-        idxFileName,
-        binFileName,
-      });
-    }
-
-    this.touchHandle(key);
+    const handle = this.handlePool.require({ strategy, playerCount: params.playerCount, depthBb: params.depthBb });
     return this.batchQuerySync(handle, params.requests);
   }
 
@@ -352,19 +207,7 @@ export class RangeStrataQueryService {
     if (params.requests.length === 0) return 0;
 
     const strategy = params.strategy ?? "default";
-    const idxFileName = getIdxFileName(strategy, params.playerCount, params.depthBb);
-    const binFileName = getBinFileName(strategy, params.playerCount, params.depthBb);
-    const key = `${idxFileName}|${binFileName}`;
-    const handle = this.handles.get(key);
-
-    if (!handle) {
-      throw new PreflopQueryError("BIN_FILE_NOT_FOUND", `Dimension handle not cached. Call prewarmDimension() first.`, {
-        idxFileName,
-        binFileName,
-      });
-    }
-
-    this.touchHandle(key);
+    const handle = this.handlePool.require({ strategy, playerCount: params.playerCount, depthBb: params.depthBb });
     const rustRequests: BatchQueryRequest[] = [];
     for (const req of params.requests) {
       const handId = this.getKnownHandId(req.holeCards);
@@ -396,176 +239,19 @@ export class RangeStrataQueryService {
     actionNames?: string[];
     minFrequency?: number;
   }): Promise<string[]> {
-    const strategy = params.strategy ?? "default";
-    const idxFileName = getIdxFileName(strategy, params.playerCount, params.depthBb);
-    const binFileName = getBinFileName(strategy, params.playerCount, params.depthBb);
-    const idxPath = join(this.binaryDir, idxFileName);
-    const binPath = join(this.binaryDir, binFileName);
-    const idxReader = new RangeIdxReader(idxPath);
-    await idxReader.open();
-
-    try {
-      const idxRecord = idxReader.find(params.concreteLineId);
-      if (!idxRecord) return [];
-
-      const binReader = new RangeBinFileReader(binPath);
-      binReader.open();
-
-      let bytes: Uint8Array;
-      try {
-        bytes = binReader.read(idxRecord.offset, idxRecord.byteLength);
-      } finally {
-        binReader.close();
-      }
-
-      if (this.options.verifyChecksums) {
-        try {
-          assertCrc32c(bytes, idxRecord.checksum);
-        } catch (error) {
-          throw new PreflopQueryError("CHECKSUM_MISMATCH", error instanceof Error ? error.message : String(error), {
-            concreteLineId: params.concreteLineId,
-            expectedChecksum: idxRecord.checksum,
-          });
-        }
-      }
-
-      const actions = this.getActionSchema(idxRecord.actionSchemaId);
-
-      const targetActionNames = params.actionNames;
-      const minFrequency = params.minFrequency ?? 0;
-
-      if (!targetActionNames || targetActionNames.length === 0) {
-        const handIds = decodeRangePackMaskMatch({
-          bytes,
-          handCount: idxRecord.handCount,
-          actionCount: actions.length,
-          targetActionIds: [],
-        });
-        return handIds.map((handId) => getHandCode(handId));
-      }
-
-      const nameToActionIds = new Map<string, number[]>();
-      for (const name of targetActionNames) {
-        const normalized = normalizeActionName(name);
-        for (const action of actions) {
-          if (action.actionName === normalized) {
-            const ids = nameToActionIds.get(normalized);
-            if (ids) {
-              ids.push(action.actionId);
-            } else {
-              nameToActionIds.set(normalized, [action.actionId]);
-            }
-          }
-        }
-      }
-
-      if (nameToActionIds.size === 0) return [];
-
-      const groupMasks: number[] = [];
-      for (const ids of nameToActionIds.values()) {
-        let groupMask = 0;
-        for (const id of ids) {
-          groupMask |= 1 << id;
-        }
-        groupMasks.push(groupMask);
-      }
-
-      const handCount = idxRecord.handCount;
-      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-      const maskOffset = handCount;
-
-      if (minFrequency <= 0) {
-        const result: string[] = [];
-        for (let i = 0; i < handCount; i++) {
-          const mask = view.getUint32(maskOffset + i * 4, true);
-          let allMatch = true;
-          for (const groupMask of groupMasks) {
-            if ((mask & groupMask) === 0) {
-              allMatch = false;
-              break;
-            }
-          }
-          if (allMatch) {
-            result.push(getHandCode(bytes[i]));
-          }
-        }
-        return result;
-      }
-
-      const candidateHandIds: number[] = [];
-      for (let i = 0; i < handCount; i++) {
-        const mask = view.getUint32(maskOffset + i * 4, true);
-        let allMatch = true;
-        for (const groupMask of groupMasks) {
-          if ((mask & groupMask) === 0) {
-            allMatch = false;
-            break;
-          }
-        }
-        if (allMatch) {
-          candidateHandIds.push(bytes[i]);
-        }
-      }
-
-      if (candidateHandIds.length === 0) return [];
-
-      const result: string[] = [];
-      for (const handId of candidateHandIds) {
-        const cells = decodeRangePackForHand({
-          bytes,
-          handCount,
-          actionCount: actions.length,
-          targetHandId: handId,
-        });
-
-        let allGroupsSatisfied = true;
-        for (const actionIds of nameToActionIds.values()) {
-          let groupSatisfied = false;
-          for (const actionId of actionIds) {
-            const cell = cells.find((c) => c.actionId === actionId);
-            if (cell && cell.exists && cell.frequency > minFrequency) {
-              groupSatisfied = true;
-              break;
-            }
-          }
-          if (!groupSatisfied) {
-            allGroupsSatisfied = false;
-            break;
-          }
-        }
-
-        if (allGroupsSatisfied) {
-          result.push(getHandCode(handId));
-        }
-      }
-
-      return result;
-    } finally {
-      idxReader.close();
-    }
+    return getHandsByActionFromStore({
+      binaryDir: this.binaryDir,
+      verifyChecksums: this.options.verifyChecksums,
+      actionSchemas: this.actionSchemas,
+      query: params,
+    });
   }
 
   close(): void {
     // Rust Drop handles mmap cleanup automatically when handle is GC'd.
     // Clear the Map to release references.
-    this.handles.clear();
-    this.handleLRU.length = 0;
+    this.handlePool.clear();
     this.metaDb.close();
-  }
-
-  // ── LRU handle pool ──
-
-  private touchHandle(key: string): void {
-    const idx = this.handleLRU.indexOf(key);
-    if (idx !== -1) this.handleLRU.splice(idx, 1);
-    this.handleLRU.push(key);
-  }
-
-  private evictLRU(): void {
-    while (this.handleLRU.length > this.maxOpenHandles) {
-      const oldest = this.handleLRU.shift()!;
-      this.handles.delete(oldest);
-    }
   }
 
   // ── 内部同步热路径（Rust-backed）──
@@ -591,200 +277,16 @@ export class RangeStrataQueryService {
 
     try {
       const flatBuffer = handle.queryBatchFlat(rustRequests, this.options.verifyChecksums ?? false);
-      return this.parseFlatBatchResult(flatBuffer, requests, requestIndexes, invalidHandErrors);
+      return parseFlatBatchResult({
+        rawBuffer: flatBuffer,
+        requests,
+        requestIndexes,
+        invalidHandErrors,
+        actionSchemas: this.actionSchemas,
+      });
     } catch (error) {
-      return this.toBatchFatalErrorResults(requests, invalidHandErrors, error);
+      return toBatchFatalErrorResults(requests, invalidHandErrors, error);
     }
-  }
-
-  private toBatchFatalErrorResults(
-    requests: BatchHandStrategyRequest[],
-    invalidHandErrors: Map<number, PreflopQueryErrorInfo>,
-    error: unknown,
-  ): BatchHandStrategyResult[] {
-    const fatalError = toPreflopQueryErrorInfo(error, "INVALID_FORMAT");
-    return requests.map((request, index) => ({
-      ...request,
-      strategy: null,
-      error: invalidHandErrors.get(index) ?? fatalError,
-    }));
-  }
-
-  /**
-   * Parse the flat binary buffer from `query_batch_flat` directly into
-   * `BatchHandStrategyResult[]`, bypassing napi object serialization for
-   * DecodedCellResult objects.
-   */
-  private parseFlatBatchResult(
-    rawBuffer: unknown,
-    requests: BatchHandStrategyRequest[],
-    requestIndexes: number[],
-    invalidHandErrors: Map<number, PreflopQueryErrorInfo>,
-  ): BatchHandStrategyResult[] {
-    // napi-rs Vec<u8> returns different types depending on runtime (Node Buffer, Bun Uint8Array, etc.).
-    // Normalize to a Uint8Array so we can reliably access .buffer/.byteOffset/.byteLength.
-    const flat = this.normalizeFlatBatchBuffer(rawBuffer);
-    const view = new DataView(flat.buffer, flat.byteOffset, flat.byteLength);
-    let offset = 0;
-
-    // Header
-    this.assertFlatBytesAvailable(flat, offset, 12, "header");
-    const magic = view.getUint32(offset, true);
-    if (magic !== FLAT_MAGIC) {
-      throw new PreflopStoreError("INVALID_FORMAT", `Invalid flat buffer magic: 0x${magic.toString(16)}`, { expected: FLAT_MAGIC, got: magic });
-    }
-    offset += 4;
-    const requestCount = view.getUint32(offset, true);
-    offset += 4;
-    /* hitCount = */ offset += 4;
-    if (requestCount !== requestIndexes.length) {
-      throw new PreflopStoreError("INVALID_FORMAT", `Flat buffer request count mismatch: expected ${requestIndexes.length}, got ${requestCount}`, {
-        expected: requestIndexes.length,
-        got: requestCount,
-      });
-    }
-
-    // Per-request table
-    this.assertFlatBytesAvailable(flat, offset, requestCount * 8, "per-request table");
-    const perRequestMeta: { cellCount: number; schemaId: number }[] = [];
-    let totalCellCount = 0;
-    for (let i = 0; i < requestCount; i++) {
-      const cellCount = view.getUint16(offset, true);
-      offset += 2;
-      /* reserved = */ offset += 2;
-      const schemaId = view.getUint32(offset, true);
-      offset += 4;
-      perRequestMeta.push({ cellCount, schemaId });
-      totalCellCount += cellCount;
-    }
-    this.assertFlatBytesAvailable(flat, offset, totalCellCount * FLAT_CELL_SIZE, "cell data");
-
-    // Pre-warm all needed action schemas in one batch
-    for (const { cellCount, schemaId } of perRequestMeta) {
-      if (cellCount > 0) {
-        this.getActionSchema(schemaId);
-      }
-    }
-
-    // Cell data section — read and assemble strategies in-place
-    const resultByIndex = new Map<number, HandStrategy | null>();
-
-    for (let i = 0; i < requestCount; i++) {
-      const originalIdx = requestIndexes[i];
-      const { cellCount, schemaId } = perRequestMeta[i];
-
-      if (cellCount === 0) {
-        resultByIndex.set(originalIdx, null);
-        continue;
-      }
-
-      const actions = this.actionCache.get(schemaId);
-      if (!actions) {
-        resultByIndex.set(originalIdx, null);
-        offset += cellCount * FLAT_CELL_SIZE;
-        continue;
-      }
-
-      const actionResults: ActionResult[] = [];
-      for (let j = 0; j < cellCount; j++) {
-        const actionId = view.getUint32(offset, true);
-        offset += 4;
-        const frequency = view.getFloat64(offset, true);
-        offset += 8;
-        const evFlag = view.getUint8(offset);
-        offset += 1;
-        const handEvRaw = view.getFloat64(offset, true);
-        offset += 8;
-
-        const action = actions[actionId];
-        if (!action) continue;
-        actionResults.push({
-          actionName: action.actionName,
-          actionSize: action.actionSize,
-          amountBB: action.amountBB,
-          frequency,
-          handEV: evFlag ? handEvRaw : null,
-          exists: true,
-        });
-      }
-
-      const holeCards = requests[originalIdx].holeCards;
-      resultByIndex.set(originalIdx, { holeCards, exists: true, actions: actionResults });
-    }
-
-    // Assemble final results
-    if (offset !== flat.byteLength) {
-      throw new PreflopStoreError("INVALID_FORMAT", "Flat batch buffer has trailing bytes", {
-        parsedBytes: offset,
-        bufferBytes: flat.byteLength,
-      });
-    }
-
-    return requests.map((request, i) => {
-      const invalidHandError = invalidHandErrors.get(i);
-      if (invalidHandError) {
-        return { ...request, strategy: null, error: invalidHandError };
-      }
-
-      const strategy = resultByIndex.get(i);
-      if (!strategy) {
-        return {
-          ...request,
-          strategy: null,
-          error: toPreflopQueryErrorInfo(
-            new PreflopQueryError("PACK_NOT_FOUND", `Range pack not found for concrete line ${request.concreteLineId}`, {
-              concreteLineId: request.concreteLineId,
-            }),
-          ),
-        };
-      }
-
-      return { ...request, strategy, error: null };
-    });
-  }
-
-  private normalizeFlatBatchBuffer(rawBuffer: unknown): Uint8Array {
-    if (rawBuffer instanceof Uint8Array) return rawBuffer;
-    if (rawBuffer instanceof ArrayBuffer) return new Uint8Array(rawBuffer);
-
-    const arrayLike = this.asArrayLike(rawBuffer);
-    if (!arrayLike) {
-      throw new PreflopStoreError("INVALID_FORMAT", "queryBatchFlat returned a non-byte-buffer value", {
-        valueType: typeof rawBuffer,
-      });
-    }
-
-    const flat = new Uint8Array(arrayLike.length);
-    for (let i = 0; i < arrayLike.length; i++) {
-      const byte = arrayLike[i];
-      if (typeof byte !== "number" || !Number.isInteger(byte) || byte < 0 || byte > 255) {
-        throw new PreflopStoreError("INVALID_FORMAT", `queryBatchFlat returned an invalid byte at offset ${i}`, {
-          offset: i,
-          value: typeof byte === "number" ? byte : String(byte),
-        });
-      }
-      flat[i] = byte;
-    }
-    return flat;
-  }
-
-  private asArrayLike(value: unknown): ArrayLike<unknown> | null {
-    if ((typeof value !== "object" && typeof value !== "function") || value === null) return null;
-
-    const maybeArrayLike = value as { length?: unknown };
-    const length = maybeArrayLike.length;
-    if (typeof length !== "number" || !Number.isSafeInteger(length) || length < 0) return null;
-    return value as ArrayLike<unknown>;
-  }
-
-  private assertFlatBytesAvailable(flat: Uint8Array, offset: number, byteLength: number, section: string): void {
-    if (offset + byteLength <= flat.byteLength) return;
-
-    throw new PreflopStoreError("INVALID_FORMAT", `Flat batch buffer is truncated while reading ${section}`, {
-      offset,
-      requiredBytes: byteLength,
-      bufferBytes: flat.byteLength,
-    });
   }
 
   private queryHandSync(
@@ -798,7 +300,7 @@ export class RangeStrataQueryService {
 
       if (!fragment) return null;
 
-      const actions = this.getActionSchema(fragment.actionSchemaId);
+      const actions = this.actionSchemas.get(fragment.actionSchemaId);
       return this.assembleHandStrategy(holeCards, fragment, actions);
     } catch (error) {
       throw toPreflopQueryError(error, "INVALID_FORMAT", {
@@ -832,38 +334,6 @@ export class RangeStrataQueryService {
     }
 
     return { holeCards, exists: true, actions: actionResults };
-  }
-
-  private getActionSchema(actionSchemaId: number): ActionDef[] {
-    const cached = this.actionCache.get(actionSchemaId);
-    if (cached) return cached;
-
-    const schemaRow = this.metaDb
-      .query(`
-        SELECT id, action_count, action_blob
-        FROM action_schemas
-        WHERE id = ?
-      `)
-      .get(actionSchemaId) as ActionSchemaRow | null;
-
-    if (!schemaRow) {
-      throw new PreflopQueryError("ACTION_SCHEMA_NOT_FOUND", `Missing action schema: ${actionSchemaId}`, {
-        actionSchemaId,
-      });
-    }
-
-    const actions = this.decodeActionSchemaRow(schemaRow);
-    this.actionCache.set(actionSchemaId, actions);
-    return actions;
-  }
-
-  private decodeActionSchemaRow(schemaRow: ActionSchemaRow): ActionDef[] {
-    const actionBlob = new Uint8Array(
-      schemaRow.action_blob.buffer,
-      schemaRow.action_blob.byteOffset,
-      schemaRow.action_blob.byteLength,
-    );
-    return decodeActionSchema(actionBlob, schemaRow.action_count);
   }
 
   private getKnownHandId(holeCards: string): number {
